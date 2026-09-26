@@ -1,0 +1,30 @@
+# Exact (spreadsheet ID, tab name) -> brand mapping. Brands are never guessed.
+# The existing email workbook and its tabs/columns are preserved exactly:
+# lead tabs use A:L with headers on row 2 and data from row 3
+# (A Person Name, B Email, C Details, D Subject, E Generated Email, F Send Status,
+#  G Sent At, H Error, I Sent From, J Approval, K Gmail Message ID, L Follow-up Status).
+#
+# Add WhatsApp/SMS tabs either per brand (brand_id) or as one shared tab with a
+# validated Brand ID column (brand_column). Column letters are exact.
+
+spreadsheets:
+  - spreadsheet_id: "18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI"   # existing email workbook
+    tabs:
+      - {tab: "Shaaadibells", brand_id: shaadi, channels: [email], header_row: 2, first_data_row: 3,
+         columns: {name: A, email: B, details: C, status: F, approval: J}}
+      - {tab: "99marketing", brand_id: marketing, channels: [email], header_row: 2, first_data_row: 3,
+         columns: {name: A, email: B, details: C, status: F, approval: J}}
+      - {tab: "Staffing", brand_id: staffing, channels: [email], header_row: 2, first_data_row: 3,
+         columns: {name: A, email: B, details: C, status: F, approval: J}}
+      - {tab: "Property", brand_id: property, channels: [email], header_row: 2, first_data_row: 3,
+         columns: {name: A, email: B, details: C, status: F, approval: J}}
+      - {tab: "Skyline capital", brand_id: skyline, channels: [email], header_row: 2, first_data_row: 3,
+         columns: {name: A, email: B, details: C, status: F, approval: J}}
+      # Example brand-specific WhatsApp/SMS tab (create the tab first):
+      # - {tab: "Shaadi WhatsApp", brand_id: shaadi, channels: [whatsapp, sms], header_row: 1,
+      #    first_data_row: 2, contact_id_column: A,
+      #    columns: {contact_id: A, name: B, phone: C, wa_consent: D, wa_consent_date: E,
+      #              sms_consent: F, sms_consent_date: G, consent_evidence: H}}
+      # Example shared tab that needs a validated Brand ID column:
+      # - {tab: "WhatsApp Contacts", brand_column: A, channels: [whatsapp], header_row: 1, first_data_row: 2,
+      #    columns: {brand: A, name: B, phone: C, wa_consent: D, wa_consent_date: E, consent_evidence: F}}
