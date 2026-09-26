@@ -1,0 +1,8 @@
+# Default gitleaks rules plus one narrow allowlist: the SHA-256 manifest of the
+# preserved email files (hex digests keyed by filenames such as credential_store.py).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "SHA-256 file digests of the preserved email application"
+paths = ['''tests/fixtures/email_baseline_manifest\.json''']

@@ -1,0 +1,12 @@
+# Runtime dependencies for uca-api / uca-webhooks / uca-workers (one image).
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.7,<3
+pyyaml>=6.0,<7
+requests>=2.32,<3
+google-auth>=2.30,<3
+google-cloud-firestore>=2.16,<3
+google-cloud-tasks>=2.16,<3
+google-cloud-secret-manager>=2.20,<3
+# Existing email application (services/email/requirements.txt), needed by the email adapter/worker
+-r services/email/requirements.txt

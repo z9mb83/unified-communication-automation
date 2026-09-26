@@ -1,0 +1,44 @@
+# ---- secrets: never commit ----
+.env
+.env.*
+!.env.example
+credentials.json
+client_secret*.json
+*token*.json
+!tests/fixtures/*.json
+gmail_tokens_bundle.json
+**/tokens/
+*.pem
+*.key
+*.p12
+service-account*.json
+config/brands.yaml
+config/sheets.yaml
+config/channels.yaml
+config/access.yaml
+
+# ---- runtime state / logs from the email app ----
+logs/
+**/logs/
+state/
+reports/
+*.lock
+*.log
+
+# ---- archives & environments ----
+*.zip
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+node_modules/
+.clasp.json
+.DS_Store
