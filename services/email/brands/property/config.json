@@ -1,0 +1,26 @@
+{
+  "brand_id": "property",
+  "brand_name": "Property Experts Group",
+  "enabled": true,
+  "gmail_accounts": [
+    "linkwithproperty@gmail.com"
+  ],
+  "sheet_id": "18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI",
+  "control_tab": "Property Email list",
+  "lead_tab": "Property",
+  "send_log_tab": "Property Send Log",
+  "suppression_tab": "Property Suppression",
+  "token_directory": "brands/property/tokens",
+  "log_directory": "brands/property/logs",
+  "mandatory_cc": "info@propertyexpertsgroup.com",
+  "hourly_limit": 3,
+  "daily_limit": 3,
+  "minimum_gap_minutes": 25,
+  "sending_start_time": "10:00",
+  "sending_end_time": "18:00",
+  "brand_facts": "Property Experts Group helps buyers, sellers and investors with property discovery, project guidance, site visit coordination and real-estate consultation.",
+  "website": "",
+  "phone": "+91 8080803736",
+  "legacy_lead_tab": "Property",
+  "initial_emergency_stop": true
+}

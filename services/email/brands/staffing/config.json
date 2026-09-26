@@ -1,0 +1,29 @@
+{
+  "brand_id": "staffing",
+  "brand_name": "99 Staffing Services",
+  "enabled": true,
+  "gmail_accounts": [
+    "linkwithstaffing@gmail.com",
+    "linkwithstaffing1@gmail.com",
+    "linkwithstaffing5@gmail.com"
+
+  ],
+  "sheet_id": "18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI",
+  "control_tab": "Staffing Email list",
+  "lead_tab": "Staffing",
+  "send_log_tab": "Staffing Send Log",
+  "suppression_tab": "Staffing Suppression",
+  "token_directory": "brands/staffing/tokens",
+  "log_directory": "brands/staffing/logs",
+  "mandatory_cc": "info@99staffingservices.com",
+  "hourly_limit": 3,
+  "daily_limit": 3,
+  "minimum_gap_minutes": 25,
+  "sending_start_time": "10:00",
+  "sending_end_time": "18:00",
+  "brand_facts": "99 Staffing Services helps businesses with staffing support, recruitment coordination, candidate sourcing, hiring outreach and workforce placement support.",
+  "website": "https://www.99staffingservices.com/",
+  "phone": "+91 8700979899",
+  "legacy_lead_tab": "Staffing",
+  "initial_emergency_stop": true
+}
