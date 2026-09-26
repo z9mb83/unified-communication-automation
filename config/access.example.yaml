@@ -1,0 +1,9 @@
+# Who may do what, per brand. Roles: viewer < operator < admin.
+# Copy to config/access.yaml (not committed) and list real Google accounts.
+users:
+  owner@example.com:
+    admin: true
+  operator@example.com:
+    brands:
+      shaadi: operator
+      marketing: viewer
