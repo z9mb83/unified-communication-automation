@@ -1,0 +1,31 @@
+# Channel behaviour. Production sending for WhatsApp and SMS is DISABLED by default.
+email:
+  manual_send_enabled: true          # "Send Email to Selected Rows" via the existing pipeline
+  max_recipients_per_job: 200
+  defer_seconds_when_paced: 300      # re-check after the existing gap/hours/limits defer a row
+  max_attempts_per_recipient: 200
+
+whatsapp:
+  graph_api_version: v26.0           # verified current at build time; review on each Meta release
+  graph_base_url: https://graph.facebook.com
+  connect_timeout_seconds: 5
+  request_timeout_seconds: 20
+  live_send_enabled: false           # set true only after credentials, webhook, templates and tests are verified
+  test_recipients: []                # E.164 digits, e.g. ["9198XXXXXXXX"]; only these receive while disabled
+  duplicate_window_hours: 24
+  max_recipients_per_job: 500
+  uncertain_reconcile_after_minutes: 15
+  default_rate_limit: {per_minute: 20, per_day: 1000}
+  brand_rate_limits: {}
+  opt_out_keywords: [STOP, UNSUBSCRIBE, STOP ALL, OPT OUT, OPTOUT, CANCEL]
+
+sms:
+  provider: mock
+  live_send_enabled: false
+  test_recipients: []
+  max_variable_length: 30
+  duplicate_window_hours: 24
+  max_recipients_per_job: 500
+  default_rate_limit: {per_minute: 20, per_day: 1000}
+  brand_rate_limits: {}
+  opt_out_keywords: [STOP, UNSUBSCRIBE]

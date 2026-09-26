@@ -1,0 +1,62 @@
+# Brand registry — copy to config/brands.yaml (NOT committed) or mount it from
+# Secret Manager at $UCA_CONFIG_DIR/brands.yaml in Cloud Run.
+#
+# Brand IDs are the five brands discovered in the existing email automation
+# (services/email/brands/<id>/config.json). Email settings stay in those JSON
+# files and are NOT duplicated here.
+#
+# NEVER put tokens, app secrets or API keys in this file: only Secret Manager
+# resource names (projects/<project>/secrets/<name>/versions/<version>).
+# WhatsApp and SMS stay disabled until you fill in real IDs and flip enabled.
+
+meta_apps: {}
+# Example once your Meta app exists:
+#   "123456789012345":
+#     app_secret_secret: projects/PROJECT_ID/secrets/uca-meta-app-secret/versions/latest
+#     verify_token_secret: projects/PROJECT_ID/secrets/uca-meta-webhook-verify-token/versions/latest
+
+brands:
+  shaadi:
+    name: Shaadi Bells
+    email: {enabled: true, legacy_config: services/email/brands/shaadi/config.json}
+    whatsapp:
+      enabled: false
+      # waba_id: "WABA_ID"
+      # app_id: "META_APP_ID"
+      # phone_numbers:
+      #   - {phone_number_id: "PHONE_NUMBER_ID", display_number: "+91 XXXXXXXXXX", default: true}
+      # access_token_secret: projects/PROJECT_ID/secrets/uca-shaadi-meta-access-token/versions/latest
+      default_country_code: "91"
+    sms:
+      enabled: false
+      provider: mock
+      # dlt_principal_entity_id: "1234567890123456789"
+      # sender_headers: ["SHDBEL"]
+      # api_secret: projects/PROJECT_ID/secrets/uca-shaadi-sms-api-key/versions/latest
+      default_country_code: "91"
+      templates: []
+      #  - template_id: "1234567890123456789"
+      #    name: meeting_reminder
+      #    sender_header: SHDBEL
+      #    content_type: service_implicit
+      #    content: "Dear {#var#}, your consultation with Shaadi Bells is on {#var#}. Call 7770000559 for help."
+  marketing:
+    name: 99 Marketing Services
+    email: {enabled: true, legacy_config: services/email/brands/marketing/config.json}
+    whatsapp: {enabled: false, default_country_code: "91"}
+    sms: {enabled: false, provider: mock, default_country_code: "91", templates: []}
+  staffing:
+    name: 99 Staffing Services
+    email: {enabled: true, legacy_config: services/email/brands/staffing/config.json}
+    whatsapp: {enabled: false, default_country_code: "91"}
+    sms: {enabled: false, provider: mock, default_country_code: "91", templates: []}
+  property:
+    name: Property Experts Group
+    email: {enabled: true, legacy_config: services/email/brands/property/config.json}
+    whatsapp: {enabled: false, default_country_code: "91"}
+    sms: {enabled: false, provider: mock, default_country_code: "91", templates: []}
+  skyline:
+    name: Skyline Capital
+    email: {enabled: true, legacy_config: services/email/brands/skyline/config.json}
+    whatsapp: {enabled: false, default_country_code: "91"}
+    sms: {enabled: false, provider: mock, default_country_code: "91", templates: []}

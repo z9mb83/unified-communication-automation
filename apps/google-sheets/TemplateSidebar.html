@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 12px; color: #202124; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    select, input[type=text] { width: 100%; box-sizing: border-box; padding: 4px; margin-top: 4px; }
+    .muted { color: #5f6368; font-size: 12px; }
+    .box { border: 1px solid #dadce0; border-radius: 6px; padding: 8px; margin-top: 10px; }
+    .warn { background: #fef7e0; border-color: #f9ab00; }
+    .err { background: #fce8e6; border-color: #d93025; }
+    .ok { background: #e6f4ea; border-color: #188038; }
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    td { padding: 3px 2px; vertical-align: top; }
+    button { margin-top: 12px; padding: 6px 12px; }
+    button.primary { background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
+    button:disabled { opacity: .5; }
+    pre { white-space: pre-wrap; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h3 id="title"></h3>
+  <div class="muted" id="summary"></div>
+
+  <label for="template">Approved template</label>
+  <select id="template" onchange="onTemplateChange()"><option value="">Loading…</option></select>
+  <div id="templateInfo" class="muted"></div>
+
+  <div id="mappingBox" class="box" style="display:none">
+    <b>Variables</b>
+    <div class="muted">Map every required variable to a column of the selected rows, or type a fixed value.</div>
+    <table id="mapping"></table>
+  </div>
+
+  <button id="previewBtn" onclick="doPreview()" disabled>Preview &amp; check eligibility</button>
+
+  <div id="previewBox" class="box" style="display:none"></div>
+
+  <div id="confirmBox" class="box warn" style="display:none">
+    <div id="confirmText"></div>
+    <label><input type="checkbox" id="confirmCheck" onchange="document.getElementById('sendBtn').disabled=!this.checked"> I confirm this brand, template and recipient count.</label>
+    <button id="sendBtn" class="primary" onclick="doSend()" disabled>Send</button>
+  </div>
+
+  <div id="result" class="box" style="display:none"></div>
+
+<script>
+  var BOOT = <?!= bootstrap ?>;
+  var TEMPLATES = [];
+  var CURRENT = null;
+  var PREVIEW = null;
+  var SUBMITTED = false;
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  function init() {
+    el('title').textContent = (BOOT.channel === 'whatsapp' ? 'WhatsApp' : 'SMS') + ' — brand ' + BOOT.brandId;
+    el('summary').textContent = 'Tab "' + BOOT.tab + '": ' + BOOT.snapshot.length + ' selected row(s), frozen at selection time.';
+    google.script.run.withSuccessHandler(onTemplates).withFailureHandler(showError)
+      .sidebarLoadTemplates(BOOT.channel, BOOT.brandId);
+  }
+
+  function onTemplates(data) {
+    TEMPLATES = data.templates || [];
+    var sel = el('template');
+    sel.innerHTML = '<option value="">— choose —</option>' + TEMPLATES.map(function (t, i) {
+      var label = BOOT.channel === 'whatsapp' ? (t.name + ' (' + t.language + ', ' + t.category + ')') : (t.name + ' [' + t.sender_header + ']');
+      return '<option value="' + i + '">' + esc(label) + '</option>';
+    }).join('');
+    if (!TEMPLATES.length) {
+      el('templateInfo').innerHTML = '<span style="color:#d93025">No approved templates for this brand.' +
+        (BOOT.channel === 'whatsapp' ? ' Run WHATSAPP → Sync Approved Templates.' : '') + '</span>';
+    }
+    if (data.live_send_enabled === false) {
+      el('templateInfo').innerHTML += '<div>Live sending is disabled for this channel.</div>';
+    }
+  }
+
+  function variableIds(t) {
+    if (BOOT.channel === 'whatsapp') return t.required_variables || [];
+    var ids = [];
+    for (var i = 1; i <= (t.variable_count || 0); i++) ids.push('var.' + i);
+    return ids;
+  }
+
+  function onTemplateChange() {
+    PREVIEW = null; el('confirmBox').style.display = 'none'; el('previewBox').style.display = 'none';
+    var idx = el('template').value;
+    CURRENT = idx === '' ? null : TEMPLATES[Number(idx)];
+    if (!CURRENT) { el('mappingBox').style.display = 'none'; el('previewBtn').disabled = true; return; }
+    el('templateInfo').innerHTML = '<pre>' + esc(CURRENT.body_text || CURRENT.content || '') + '</pre>';
+    var ids = variableIds(CURRENT);
+    var options = BOOT.columns.map(function (c) {
+      return '<option value="col:' + c.letter + '">' + c.letter + ' — ' + esc(c.header) + '</option>';
+    }).join('');
+    el('mapping').innerHTML = ids.map(function (id) {
+      return '<tr><td>' + esc(id) + '</td><td><select data-var="' + esc(id) + '" onchange="toggleFixed(this)">' +
+        '<option value="">— source —</option>' + options + '<option value="fixed">Fixed text…</option></select>' +
+        '<input type="text" data-fixed="' + esc(id) + '" style="display:none" placeholder="Fixed value"></td></tr>';
+    }).join('') || '<tr><td class="muted">This template has no variables.</td></tr>';
+    el('mappingBox').style.display = 'block';
+    el('previewBtn').disabled = false;
+  }
+
+  function toggleFixed(select) {
+    var input = document.querySelector('input[data-fixed="' + select.getAttribute('data-var') + '"]');
+    input.style.display = select.value === 'fixed' ? 'block' : 'none';
+  }
+
+  function collectMapping() {
+    var mapping = {};
+    variableIds(CURRENT).forEach(function (id) {
+      var sel = document.querySelector('select[data-var="' + id + '"]');
+      if (!sel || !sel.value) throw new Error('Choose a source for ' + id);
+      if (sel.value === 'fixed') {
+        mapping[id] = { source: 'fixed', value: document.querySelector('input[data-fixed="' + id + '"]').value };
+      } else {
+        mapping[id] = { source: 'column', value: sel.value.slice(4) };
+      }
+    });
+    return mapping;
+  }
+
+  function state() {
+    return {
+      channel: BOOT.channel, brandId: BOOT.brandId, spreadsheetId: BOOT.spreadsheetId, tab: BOOT.tab,
+      snapshot: BOOT.snapshot, submissionId: BOOT.submissionId,
+      templateId: CURRENT.template_id, language: CURRENT.language, mapping: collectMapping()
+    };
+  }
+
+  function doPreview() {
+    try {
+      var s = state();
+      el('previewBtn').disabled = true;
+      google.script.run.withSuccessHandler(onPreview).withFailureHandler(showError).sidebarPreview(s);
+    } catch (e) { showError(e); }
+  }
+
+  function onPreview(p) {
+    PREVIEW = p;
+    el('previewBtn').disabled = false;
+    var box = el('previewBox');
+    box.className = 'box ' + (p.eligible_count ? 'ok' : 'err');
+    box.style.display = 'block';
+    var reasons = {};
+    p.ineligible.forEach(function (i) { reasons[i.reason] = (reasons[i.reason] || 0) + 1; });
+    box.innerHTML = '<b>Eligible: ' + p.eligible_count + '</b> · Not eligible: ' + p.ineligible.length +
+      (Object.keys(reasons).length ? '<div class="muted">' + Object.keys(reasons).map(function (r) { return esc(r) + ': ' + reasons[r]; }).join('<br>') + '</div>' : '') +
+      (p.warnings && p.warnings.length ? '<div style="margin-top:6px">' + p.warnings.map(esc).join('<br>') + '</div>' : '') +
+      (p.template && p.template.sample ? '<div class="muted" style="margin-top:6px">Sample:</div><pre>' + esc(p.template.sample) + '</pre>' : '');
+    if (p.eligible_count > 0 && !SUBMITTED) {
+      el('confirmText').innerHTML = '<b>Brand:</b> ' + esc(p.brand_id) + '<br><b>Template:</b> ' +
+        esc(p.template.name) + (p.template.language ? ' (' + esc(p.template.language) + ')' : '') +
+        '<br><b>Recipients to send:</b> ' + p.eligible_count;
+      el('confirmCheck').checked = false; el('sendBtn').disabled = true;
+      el('confirmBox').style.display = 'block';
+    }
+  }
+
+  function doSend() {
+    if (SUBMITTED || !PREVIEW) return;
+    SUBMITTED = true;
+    el('sendBtn').disabled = true; el('previewBtn').disabled = true; el('template').disabled = true;
+    google.script.run.withSuccessHandler(function (r) {
+      var box = el('result'); box.className = 'box ok'; box.style.display = 'block';
+      box.innerHTML = '<b>Submitted.</b> Job ' + esc(r.job_id) + ' — ' + r.recipient_count + ' message(s) queued.' +
+        (r.created ? '' : ' (This confirmation had already been submitted; no duplicate job was created.)') +
+        '<div class="muted">Use SYSTEM → View Job Status to follow delivery.</div>';
+      el('confirmBox').style.display = 'none';
+    }).withFailureHandler(function (e) { showError(e); }).sidebarSend(state(), PREVIEW.confirmation_hash);
+  }
+
+  function showError(e) {
+    var box = el('result'); box.className = 'box err'; box.style.display = 'block';
+    box.textContent = String(e && e.message ? e.message : e);
+    el('previewBtn').disabled = !CURRENT;
+  }
+
+  init();
+</script>
+</body>
+</html>

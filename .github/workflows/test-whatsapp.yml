@@ -1,0 +1,27 @@
+name: Test whatsapp
+
+on:
+  pull_request:
+    paths:
+      - "services/whatsapp/**"
+      - "shared/**"
+      - "tests/unit/whatsapp/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      UCA_ENV: test
+      UCA_AUTH_DISABLED_FOR_LOCAL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-dev.txt}
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/unit/whatsapp tests/integration/test_api_flows.py tests/contract tests/end_to_end

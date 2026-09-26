@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {"collectionGroup": "uca_messages", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "brand_id", "order": "ASCENDING"}, {"fieldPath": "channel", "order": "ASCENDING"},
+      {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "uca_staging_messages", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "brand_id", "order": "ASCENDING"}, {"fieldPath": "channel", "order": "ASCENDING"},
+      {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "uca_messages", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "job_id", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "uca_staging_messages", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "job_id", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "uca_wa_templates", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "brand_id", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "uca_staging_wa_templates", "queryScope": "COLLECTION", "fields": [
+      {"fieldPath": "brand_id", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}
