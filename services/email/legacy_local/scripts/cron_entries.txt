@@ -1,0 +1,9 @@
+Main job, every five minutes from 10:00 through 17:55, Monday-Saturday.
+This assumes the VM timezone is Asia/Kolkata. If the VM uses UTC, convert the cron hours first.
+
+*/5 10-17 * * 1-6 flock -n /tmp/unified_email_automation.lock bash -lc 'cd /home/linkwithmarketing/unified_email_automation && .venv/bin/python main.py >> logs/unified_main.log 2>&1'
+
+Daily maintenance at 9:50 AM, Monday-Saturday.
+
+50 9 * * 1-6 flock -n /tmp/unified_email_maintenance.lock bash -lc 'cd /home/linkwithmarketing/unified_email_automation && .venv/bin/python daily_maintenance.py >> logs/unified_maintenance.log 2>&1'
+
