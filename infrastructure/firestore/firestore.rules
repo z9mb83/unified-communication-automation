@@ -1,0 +1,10 @@
+rules_version = '2';
+// No client (web/mobile) access at all. Only server-side service accounts using
+// the Admin/Server SDKs (which bypass rules) read or write this database.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
