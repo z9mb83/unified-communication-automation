@@ -20,11 +20,15 @@ spreadsheets:
          columns: {name: A, email: B, details: C, status: F, approval: J}}
       - {tab: "Skyline capital", brand_id: skyline, channels: [email], header_row: 2, first_data_row: 3,
          columns: {name: A, email: B, details: C, status: F, approval: J}}
-      # Example brand-specific WhatsApp/SMS tab (create the tab first):
-      # - {tab: "Shaadi WhatsApp", brand_id: shaadi, channels: [whatsapp, sms], header_row: 1,
-      #    first_data_row: 2, contact_id_column: A,
-      #    columns: {contact_id: A, name: B, phone: C, wa_consent: D, wa_consent_date: E,
-      #              sms_consent: F, sms_consent_date: G, consent_evidence: H}}
-      # Example shared tab that needs a validated Brand ID column:
-      # - {tab: "WhatsApp Contacts", brand_column: A, channels: [whatsapp], header_row: 1, first_data_row: 2,
-      #    columns: {brand: A, name: B, phone: C, wa_consent: D, wa_consent_date: E, consent_evidence: F}}
+  # WhatsApp workbook: https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit
+  # One shared contacts tab; every row's Brand ID (column A) must exactly match the brand being sent.
+  - spreadsheet_id: "1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4"
+    tabs:
+      - {tab: "WhatsApp Contacts", brand_column: A, channels: [whatsapp], header_row: 1, first_data_row: 2,
+         columns: {brand: A, name: B, phone: C, details: D, wa_consent: E, wa_consent_date: F, consent_evidence: G}}
+
+  # SMS workbook: https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit
+  - spreadsheet_id: "105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk"
+    tabs:
+      - {tab: "SMS Contacts", brand_column: A, channels: [sms], header_row: 1, first_data_row: 2,
+         columns: {brand: A, name: B, phone: C, details: D, sms_consent: E, sms_consent_date: F, consent_evidence: G}}
