@@ -1,0 +1,16 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "id": "111",
+    "changes": [{
+      "field": "messages",
+      "value": {
+        "messaging_product": "whatsapp",
+        "metadata": {"display_phone_number": "910000000000", "phone_number_id": "2001"},
+        "contacts": [{"profile": {"name": "Sample"}, "wa_id": "919800000009"}],
+        "messages": [{"from": "919800000009", "id": "wamid.IN", "timestamp": "1758880001", "type": "button",
+                      "button": {"payload": "STOP", "text": "Stop promotions"}}]
+      }
+    }]
+  }]
+}
