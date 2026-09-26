@@ -1,0 +1,48 @@
+name: Security scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "30 2 * * 1"   # weekly, Monday 08:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks git --redact --verbose --config .gitleaks.toml --exit-code 1 .
+      - name: Forbidden files are not tracked
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env|credentials\.json|gmail_tokens_bundle\.json)$|/tokens/|\.zip$|\.venv/'; then
+            echo "Forbidden file tracked"; exit 1; fi
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt --progress-spinner off
+
+  sast:
+    name: Static analysis (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install bandit
+      - run: bandit -q -r shared services/api services/whatsapp services/sms services/workers services/email/compat -ll

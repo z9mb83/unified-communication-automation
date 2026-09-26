@@ -1,0 +1,6 @@
+# Default owner for everything
+*                       @linkwithmarketing-design
+# The existing, working email automation: changes need explicit owner review
+/services/email/        @linkwithmarketing-design
+/infrastructure/        @linkwithmarketing-design
+/.github/workflows/     @linkwithmarketing-design

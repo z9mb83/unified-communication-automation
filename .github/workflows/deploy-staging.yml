@@ -1,0 +1,59 @@
+name: Deploy staging
+
+# Builds the uca image and deploys uca-api/uca-webhooks/uca-workers *-staging.
+# Never builds, deploys or schedules the existing email-sender job.
+# Requires repository variables (Settings → Secrets and variables → Actions → Variables):
+#   GCP_PROJECT_ID, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOY_SA, APPS_SCRIPT_CLIENT_ID, ARTIFACT_REPO
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # Workload Identity Federation (no JSON keys)
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    if: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_WIF_PROVIDER != '' }}
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
+      ENVIRONMENT: staging
+      APPS_SCRIPT_CLIENT_ID: ${{ vars.APPS_SCRIPT_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Tests must pass before deploy
+        env: {UCA_ENV: test, UCA_AUTH_DISABLED_FOR_LOCAL: "true"}
+        run: pip install -r requirements-dev.txt && pytest -p no:cacheprovider
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${{ vars.ARTIFACT_REPO || 'uca' }}/uca:${GITHUB_SHA}"
+          gcloud builds submit --project "$PROJECT_ID" --region "$REGION" \
+            --config infrastructure/cloud-run/cloudbuild.yaml --substitutions "_IMAGE=${IMAGE}" .
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - name: Deploy staging services
+        run: ./infrastructure/cloud-run/deploy.sh
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe uca-webhooks-staging --project "$PROJECT_ID" --region "$REGION" --format 'value(status.url)')
+          curl -fsS "$URL/healthz"
+
+  not-configured:
+    runs-on: ubuntu-latest
+    if: ${{ vars.GCP_PROJECT_ID == '' || vars.GCP_WIF_PROVIDER == '' }}
+    steps:
+      - run: echo "::notice::Staging deploy skipped - GCP_PROJECT_ID / GCP_WIF_PROVIDER repository variables are not configured. See docs/DEPLOYMENT.md."
