@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Components are merged incrementally; checks cover whichever of these exist.
+  TYPED_PATHS: shared services/api services/whatsapp services/sms services/workers services/email/compat scripts
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install "ruff>=0.6" "black>=24"
+      - run: ruff check .
+      - run: black --check .
+
+  typecheck:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-dev.txt}
+      - run: pip install -r requirements-dev.txt
+      - name: mypy
+        run: |
+          paths=$(for p in $TYPED_PATHS; do [ -d "$p" ] && echo "$p"; done)
+          if [ -z "$paths" ]; then echo "nothing to type-check yet"; exit 0; fi
+          mypy $paths
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    env:
+      UCA_ENV: test
+      UCA_AUTH_DISABLED_FOR_LOCAL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: requirements-dev.txt}
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - run: pip install -r requirements-dev.txt
+      - name: Existing email application is byte-identical to the original
+        run: |
+          if [ -f scripts/verify_email_regression.py ]; then python -m scripts.verify_email_regression
+          else pytest tests/unit/email/test_email_baseline.py; fi
+      - name: Full test suite (all providers mocked; nothing is sent)
+        run: pytest -p no:cacheprovider
+      - name: Configuration examples validate
+        if: hashFiles('scripts/validate_configuration.py', 'services/api/deps.py') != ''
+        run: |
+          if [ -f services/api/deps.py ]; then python -m scripts.validate_configuration; fi
+
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Email-sender image still builds from the untouched files (not pushed, not deployed)
+        run: docker build -f services/email/Dockerfile -t email-sender:ci services/email
+      - name: Build service image (not pushed)
+        if: hashFiles('services/api/main.py', 'infrastructure/cloud-run/Dockerfile') != ''
+        run: |
+          if [ ! -f services/api/main.py ] || [ ! -f infrastructure/cloud-run/Dockerfile ]; then echo "service image not present yet"; exit 0; fi
+          docker build -f infrastructure/cloud-run/Dockerfile -t uca:ci .
+          for role in api webhooks workers; do
+            docker run -d --name uca-$role -e UCA_ENV=test -e UCA_SERVICE_ROLE=$role -e UCA_STORE_BACKEND=memory \
+              -e UCA_QUEUE_BACKEND=inline -e PORT=8080 -p 8080 uca:ci
+          done
+          sleep 6
+          for role in api webhooks workers; do
+            port=$(docker port uca-$role 8080/tcp | head -1 | awk -F: '{print $NF}')
+            curl -fsS "http://localhost:$port/healthz"; echo
+          done
