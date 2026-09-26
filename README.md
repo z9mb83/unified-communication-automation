@@ -14,6 +14,21 @@ through the **AUTOMATION MANAGER** menu and executed by Cloud Run workers.
 * **SMS** — India DLT-compliant, provider-neutral pipeline with a test adapter. **No live
   provider configured yet.**
 
+## Google Sheets workbooks
+
+| Channel | Workbook | Contacts tab |
+|---|---|---|
+| Email (existing) | [Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit) | Brand tabs (`Shaaadibells`, `99marketing`, `Staffing`, `Property`, `Skyline capital`) + control / Send Log / Suppression tabs |
+| WhatsApp | [WhatsApp Automation](https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit) | `WhatsApp Contacts` |
+| SMS | [SMS Automation](https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit) | `SMS Contacts` |
+
+WhatsApp/SMS contacts columns: **A Brand ID** (`shaadi`, `marketing`, `staffing`, `property`, `skyline` —
+must match exactly), B Person Name, C Phone, D Details, E Consent (Yes/No), F Consent Date,
+G Consent Evidence, H–K Var 1–4 (template variables, mapped in the sidebar), L Notes.
+Install the Apps Script from `apps/google-sheets/` in each workbook and run
+**AUTOMATION MANAGER → SYSTEM → Set Up Configuration Tabs** to add `Approved_WA_Templates` /
+`Approved_SMS_Templates`, `Brand_Config`, `API_Config`, `Automation_Control` and `Send_Logs`.
+
 ```
 apps/google-sheets/     Apps Script UI (menu, selection snapshot, template sidebar)
 services/email/         EXISTING email automation (byte-identical) + compat/ adapter

@@ -2,8 +2,15 @@
 
 The Apps Script project is only a UI. It never sends messages and never holds secrets.
 
+## Workbooks
+* Email (existing): https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit
+* WhatsApp: https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit (tab `WhatsApp Contacts`)
+* SMS: https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit (tab `SMS Contacts`)
+
+Repeat the installation below in each workbook (the script is container-bound).
+
 ## 1. Install the script in the workbook
-1. Open the existing email workbook → **Extensions → Apps Script**.
+1. Open the workbook → **Extensions → Apps Script**.
 2. Project Settings → tick **Show "appsscript.json" manifest file**.
 3. Create files with exactly these names and paste the contents from `apps/google-sheets/`:
    `Code.gs`, `Menu.gs`, `BrandDetector.gs`, `SelectionHandler.gs`, `TemplateManager.gs`,
