@@ -37,7 +37,12 @@ The complete code from before this layout is on the branch `v1-before-master-she
 | **Settings** | WhatsApp live switch + test numbers, and switch-over status |
 | Mail Control XX / Mail Log XX | Hidden technical tabs used by the mail tool (settings follow the Limits tab) |
 
-Menu **AUTOMATION**: Set up / repair tabs · Mail (import, status) · WhatsApp (save token, check templates, send now, automatic on/off).
+Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, import, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off).
+
+**Send to selected rows** (select rows in a brand tab, then the menu item): sends right away, ignoring sending hours,
+gap and brand limits. Still respected: Mail/WhatsApp On in Limits, Do Not Contact, already sent, mailbox daily limits (mail),
+consent + test mode (WhatsApp). Mail rows with no draft get an AI draft sent without review. Mail requests are
+queued in the hidden tab "Mail Send Now" and the mail job is started at once (`mail/app/send_now.py`).
 
 ## How limits work
 - **Mail**: the sender runs every 5 minutes (10:00-17:55, Mon-Sat) and sends at most one email per brand per run,

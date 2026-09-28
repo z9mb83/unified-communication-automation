@@ -18,6 +18,8 @@ class FakeRange {
   setFormula(f) { return this.setValue(f); }
   setFormulas(f) { return this.setValues(f); }
   clearContent() { this._cells((r, c) => this.sheet._set(r, c, '')); return this; }
+  getRow() { return this.r; }
+  getNumRows() { return this.nr; }
   getNote() { return this.sheet.notes[`${this.r},${this.c}`] || ''; }
   setNote(n) { this.sheet.notes[`${this.r},${this.c}`] = n; return this; }
 }
@@ -48,6 +50,8 @@ class FakeSheet {
     return new FakeRange(this, r1, c1, (m[3] ? r2 : r1) - r1 + 1, c2 - c1 + 1);
   }
   getDataRange() { return new FakeRange(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
+  setSelection(blocks) { this.selection = blocks; }
+  getActiveRangeList() { return { getRanges: () => (this.selection || []).map(([r, n]) => new FakeRange(this, r, 1, n, 1)) }; }
   appendRow(row) { const r = this.getLastRow() + 1; row.forEach((v, j) => this._set(r, j + 1, v)); }
   clear() { this.data = {}; this.notes = {}; }
 }
@@ -58,6 +62,7 @@ class FakeSpreadsheet {
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n, idx) { const s = new FakeSheet(this, n); if (idx === undefined) this.sheets.push(s); else this.sheets.splice(idx, 0, s); return s; }
   getSheets() { return this.sheets.slice(); }
+  getActiveSheet() { return this.active; }
   setActiveSheet(s) { this.active = s; return s; }
   moveActiveSheet(pos) { const i = this.sheets.indexOf(this.active); this.sheets.splice(i, 1); this.sheets.splice(pos - 1, 0, this.active); }
 }
@@ -82,7 +87,8 @@ function makeGlobals({ active, others = {}, fetch }) {
       return fmt.replace(/yyyy|MM|dd|HH|mm|ss/g, t => map[t]);
     } },
     UrlFetchApp: { fetch },
-    ScriptApp: { getProjectTriggers: () => triggers, deleteTrigger: t => triggers.splice(triggers.indexOf(t), 1),
+    Session: { getActiveUser: () => ({ getEmail: () => 'me@x.com' }) },
+    ScriptApp: { getOAuthToken: () => 'oauth-token', getProjectTriggers: () => triggers, deleteTrigger: t => triggers.splice(triggers.indexOf(t), 1),
       newTrigger: h => ({ timeBased: () => ({ everyMinutes: () => ({ create: () => triggers.push({ getHandlerFunction: () => h }) }) }) }) },
     Logger: { log: m => logs.push(m) },
     __props: props, __logs: logs, __triggers: triggers

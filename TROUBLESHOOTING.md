@@ -17,7 +17,9 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Drafts not written / OpenAI error | Check `OPENAI_API_KEY` secret | `mail/app/email_generator.py` |
 | `Recipient suppressed` / `already contacted` | Expected; see **Do Not Contact** / Mail Log | `mail/app/suppression_manager.py`, `mail/app/duplicate_manager.py` |
 | Sheets `403` | Share sheet (Editor) with `email-sender-runner@…` | — |
-| Sender code broken / needs redeploy | `bash go_master.sh prepare` | `mail/go_master.sh`, `mail/Dockerfile.master` |
+| Send-now: "Could not start the mail tool" | Approve the Google Cloud permission once; else it goes with the next scheduled run | `mail/sheet/Mail.gs` (`mlStartMailJob_`), `common/appsscript.json` |
+| Send-now row still Pending / Skipped | Menu **Show send-now results** (reason shown; can restart) | `mail/app/send_now.py` |
+| Sender code broken / needs redeploy | `bash go_master.sh sender` | `mail/go_master.sh`, `mail/Dockerfile.master` |
 
 ## Reports (10 AM / 6 PM)
 | Error / symptom | Fix | File |
@@ -47,7 +49,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | `Retry` | Rate limit; resent next run | `whatsapp/WhatsApp.gs` (`waClassifyError_`) |
 | `Uncertain` | Check WhatsApp Manager before clearing status | same |
 | `daily/hourly limit reached`, `waiting for the gap` | **Limits** → WhatsApp row | `whatsapp/WhatsApp.gs` (`waAllowance_`) |
+| "Send WhatsApp to selected rows" skips a row | Consent = Yes, not Do Not Contact, not Sent; test mode sends only to test numbers | `whatsapp/WhatsApp.gs` (`waForceCheck_`) |
 | Automatic sending stopped | Menu **Turn automatic sending ON** | `whatsapp/WhatsApp.gs` (`waAutoOn`) |
 
 ## Before pasting / deploying a fix
-`node --test common/test/sheet.test.js` · `cd mail && python -m unittest test_mail_limits test_daily_report`
+`node --test common/test/sheet.test.js` · `cd mail && python -m unittest test_mail_limits test_daily_report test_send_now`

@@ -3,6 +3,7 @@
 #   bash go_master.sh prepare   build new images, create job email-sender-master (NO schedule), dry run (sends nothing)
 #   bash go_master.sh pause     pause the old sender's schedule
 #   bash go_master.sh switch    schedule email-sender-master + point both report jobs at the master sheet
+#   bash go_master.sh sender    deploy sender code changes to email-sender-master (+ reports), then a dry run that sends nothing
 #   bash go_master.sh reports   deploy report changes only (10 AM / 6 PM emails); sender untouched, preview sends nothing
 #   bash go_master.sh stop      pause both senders
 #   bash go_master.sh rollback  old sender back on (only safe if the new one has not sent yet)
@@ -70,6 +71,23 @@ PY
     done
     gcloud scheduler jobs list --location $R --format='table(name.basename(),schedule,state)'
     echo "SWITCH DONE"
+    ;;
+  sender)
+    BASE=$(img email-sender)
+    if [[ "$BASE" != *@sha256:* ]]; then BASE=$(gcloud artifacts docker images describe "$BASE" --format='value(image_summary.fully_qualified_digest)'); fi
+    REPO=${BASE%%@*}; REPO=${REPO%:*}; REPO=${REPO%/*}
+    STAMP=$(date +%Y%m%d-%H%M)
+    SENDER="$REPO/email-sender:master-$STAMP"; REPORTS="$REPO/email-report:master-$STAMP"
+    echo "previous sender=$(img email-sender-master)" | tee ~/sender_previous_image
+    gcloud builds submit --config cloudbuild.master.yaml --substitutions=_BASE="$BASE",_SENDER="$SENDER",_REPORTS="$REPORTS" .
+    gcloud run jobs update email-sender-master --region $R --image "$SENDER" --quiet
+    for j in email-report-morning email-report-evening; do
+      gcloud run jobs update $j --region $R --image "$REPORTS" --quiet
+    done
+    echo "$SENDER" > ~/master_sender_image; echo "$REPORTS" > ~/master_reports_image
+    echo "== Dry run (reads the master sheet; sends nothing, writes nothing)"
+    gcloud run jobs execute email-sender-master --region $R --args=--dry-run,--read-sheets --wait
+    echo "SENDER DONE ($SENDER). Undo: gcloud run jobs update email-sender-master --region $R --image <previous sender above>"
     ;;
   reports)
     BASE=$(img email-sender-master)

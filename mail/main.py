@@ -39,6 +39,24 @@ def run_unified(
     round_robin = build_round_robin_state()
     state = build_global_state()
 
+    if not dry_run and not generate_only and selected_brand is None:
+        # Rows selected in the sheet with "Send mail to selected rows" go first.
+        try:
+            from datetime import datetime
+
+            from app.send_now import process_queue
+            from app.sheet_client import SheetClient
+            from app.utilities import timezone_for
+
+            tz = timezone_for(runtime.timezone)
+            for line in process_queue(lambda b: BrandRunner(runtime, b, state), list(all_brands.values()),
+                                      lambda sid: SheetClient(sid), lambda: datetime.now(tz)):
+                print(line)
+                logger.info(line)
+        except Exception as error:
+            logger.exception("send-now queue failed")
+            print(f"send-now queue failed: {error}")
+
     ordered_ids = round_robin.ordered_brand_ids(selected_brand)
     results: list[BrandRunResult] = []
     for brand_id in ordered_ids:
