@@ -1,0 +1,5 @@
+# Builds the report image on Cloud Build (used by deploy_reports.sh).
+steps:
+- name: gcr.io/cloud-builders/docker
+  args: ['build', '-f', 'Dockerfile.reports', '--build-arg', 'BASE_IMAGE=${_BASE}', '-t', '${_NEW}', '.']
+images: ['${_NEW}']

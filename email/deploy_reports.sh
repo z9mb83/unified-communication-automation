@@ -20,10 +20,8 @@ NEW="$REPO:replies-$(date +%Y%m%d-%H%M)"
 echo "Base (email-sender): $BASE"
 echo "New report image:    $NEW"
 
-echo "== 2. Build (runs the unit tests) and push"
-gcloud auth configure-docker "${NEW%%/*}" --quiet
-docker build -f Dockerfile.reports --build-arg BASE_IMAGE="$BASE" -t "$NEW" .
-docker push "$NEW"
+echo "== 2. Build on Cloud Build (runs the unit tests) and push"
+gcloud builds submit --config cloudbuild.reports.yaml --substitutions=_BASE="$BASE",_NEW="$NEW" .
 
 echo "== 3. Point both report jobs at the new image"
 gcloud run jobs update email-report-morning --region $R --image "$NEW" --quiet
