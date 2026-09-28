@@ -40,6 +40,16 @@ def log_is_this_hour(log_row: list[Any], now: datetime, tz: ZoneInfo) -> bool:
     return bool(logged and logged.date() == now.date() and logged.hour == now.hour)
 
 
+def brand_cap_reason(logs: list[list[Any]], now: datetime, tz: ZoneInfo, day_cap: int, hour_cap: int) -> str:
+    """Brand-wide limits from the Limits tab ("Brand max per day/hour"); 0 or blank = no brand cap."""
+    sent = [log for log in logs if len(log) >= 6 and str(log[5]).strip() == "Sent"]
+    if day_cap > 0 and sum(1 for log in sent if log_is_today(log, now, tz)) >= day_cap:
+        return f"Brand daily limit reached ({day_cap} per day)"
+    if hour_cap > 0 and sum(1 for log in sent if log_is_this_hour(log, now, tz)) >= hour_cap:
+        return f"Brand hourly limit reached ({hour_cap} per hour)"
+    return ""
+
+
 def read_mailboxes_from_rows(
     brand: BrandConfig,
     rows: list[list[Any]],

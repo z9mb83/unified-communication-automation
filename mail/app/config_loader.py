@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 from app.utilities import is_valid_email, token_filename_for
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-BRANDS_DIR = BASE_DIR / "brands"
+# BRANDS_DIR=brands (old email workbook) or brands_master (Automation Control Center).
+BRANDS_DIR = BASE_DIR / os.getenv("BRANDS_DIR", "brands")
 STATE_DIR = BASE_DIR / "state"
 LOGS_DIR = BASE_DIR / "logs"
 SCRIPTS_DIR = BASE_DIR / "scripts"

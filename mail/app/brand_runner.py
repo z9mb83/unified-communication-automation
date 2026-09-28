@@ -17,7 +17,7 @@ from app.duplicate_manager import sent_recipients
 from app.email_generator import generate_email
 from app.gmail_client import send_email
 from app.global_state import GlobalState
-from app.limit_manager import Mailbox, read_mailboxes_from_rows, select_mailbox
+from app.limit_manager import Mailbox, brand_cap_reason, read_mailboxes_from_rows, select_mailbox
 from app.send_logger import append_sheet_log, logger_for
 from app.sheet_client import SheetClient
 from app.suppression_manager import suppressed_recipients
@@ -128,6 +128,19 @@ class BrandRunner:
             result.skipped_reason = "No approved lead is ready"
             if dry_run:
                 result.dry_run_notes.append("No approved lead would be sent.")
+            return result
+
+        cap_reason = brand_cap_reason(
+            logs,
+            now,
+            self.tz,
+            number(settings.get("Brand max per day"), 0),
+            number(settings.get("Brand max per hour"), 0),
+        )
+        if cap_reason:
+            result.skipped_reason = cap_reason
+            if dry_run:
+                result.dry_run_notes.append(cap_reason)
             return result
 
         local_remaining = self._remaining_sheet_gap_minutes(logs, now, minimum_gap)
