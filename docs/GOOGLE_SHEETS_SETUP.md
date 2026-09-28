@@ -7,7 +7,13 @@ The Apps Script project is only a UI. It never sends messages and never holds se
 * WhatsApp: https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit (tab `WhatsApp Contacts`)
 * SMS: https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit (tab `SMS Contacts`)
 
+* Central control: https://docs.google.com/spreadsheets/d/1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc/edit
+  (Automation Control Center — live counts, task list; also set Script Property
+  `UCA_EMAIL_SPREADSHEET_ID` = the email workbook ID so Stop / Emergency Stop reach the existing cells)
+
 Repeat the installation below in each workbook (the script is container-bound).
+The scope `spreadsheets` (not `currentonly`) is used so the Control Center can set the email
+workbook's existing "Emergency stop" cells.
 
 ## 1. Install the script in the workbook
 1. Open the workbook → **Extensions → Apps Script**.

@@ -88,17 +88,27 @@ function setAllEmailEmergencyCells_(value) {
   if (failed.length) SpreadsheetApp.getUi().alert('Could not update:\n' + failed.join('\n'));
 }
 
-/** {brand_id: control tab name} for brands whose email tabs are mapped in this workbook. */
+/**
+ * The email workbook to act on. In the email workbook itself this is the active
+ * spreadsheet; in the central Automation Control Center set the Script Property
+ * UCA_EMAIL_SPREADSHEET_ID so Stop/Emergency Stop can set the existing cells remotely.
+ */
+function emailSpreadsheet_() {
+  var id = PropertiesService.getScriptProperties().getProperty('UCA_EMAIL_SPREADSHEET_ID');
+  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+}
+
+/** {brand_id: control tab name} for brands whose email tabs are mapped in the email workbook. */
 function emailControlTabs_() {
-  var data = apiGet_('/v1/config/email-control-tabs', { spreadsheet_id: SpreadsheetApp.getActiveSpreadsheet().getId() });
+  var data = apiGet_('/v1/config/email-control-tabs', { spreadsheet_id: emailSpreadsheet_().getId() });
   return data.control_tabs || {};
 }
 
 /** Writes only the value cell next to the existing "Emergency stop" label (rows 2-10). */
 function setEmergencyCell_(tabName, value) {
   if (!tabName) throw new Error('Email control tab for this brand is unknown.');
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tabName);
-  if (!sheet) throw new Error('Control tab "' + tabName + '" not found in this workbook.');
+  var sheet = emailSpreadsheet_().getSheetByName(tabName);
+  if (!sheet) throw new Error('Control tab "' + tabName + '" not found in the email workbook.');
   var labels = sheet.getRange(2, 1, 9, 1).getDisplayValues();
   for (var i = 0; i < labels.length; i++) {
     if (String(labels[i][0]).trim() === 'Emergency stop') {
