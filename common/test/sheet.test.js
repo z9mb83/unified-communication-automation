@@ -143,9 +143,13 @@ test('setup + import from the old sheet (old sheet is only read)', () => {
   assert.strictEqual(ctl.getRange('F13').getValue(), '1');
   assert.strictEqual(ctl.getRange('B6').getValue(), 'info@99marketingservices.com');
 
-  // importing twice does not duplicate anything
+  // importing twice does not duplicate anything (including old rows that have no email)
+  old.getSheetByName('99marketing').getRange(6, 1, 1, 14).setValues([['No email lead', '', 'note', '', '', '', '', '', '', '', '', '', '', '']]);
   g.mlImportFromOldSheet();
-  assert.strictEqual(t.getLastRow(), 5);
+  g.mlImportFromOldSheet();
+  g.mlImportFromOldSheet();
+  assert.strictEqual(t.getLastRow(), 6);
+  assert.strictEqual(t.getDataRange().getValues().filter(r => r[0] === 'No email lead').length, 1);
   assert.strictEqual(master.getSheetByName('Do Not Contact').getLastRow(), 2);
 
   // after the switch, import is blocked

@@ -21,7 +21,8 @@ function mlMergeRows_(oldRows, masterRows) {
   function pad(r, n) { r = (r || []).slice(0, n); while (r.length < n) r.push(''); return r; }
   function key(r) { return String(r[1] || '').trim().toLowerCase(); }
   function blank(r) { return r.every(function (v) { return String(v === null || v === undefined ? '' : v).trim() === ''; }); }
-  var extraByEmail = {}, oldEmails = {}, out = [];
+  function sig(r) { return pad(r, 14).map(function (v) { return String(v === null || v === undefined ? '' : v).trim(); }).join('\u241f'); }
+  var extraByEmail = {}, oldEmails = {}, oldSigs = {}, out = [];
   masterRows.forEach(function (r) {
     r = pad(r, WIDTH);
     var k = key(r);
@@ -31,14 +32,14 @@ function mlMergeRows_(oldRows, masterRows) {
     r = pad(r, 14);
     if (blank(r)) return;
     var k = key(r);
-    if (k) oldEmails[k] = true;
+    if (k) oldEmails[k] = true; else oldSigs[sig(r)] = true;
     out.push(r.concat(k && extraByEmail[k] ? extraByEmail[k] : pad([], 6)));
   });
   masterRows.forEach(function (r) {
     r = pad(r, WIDTH);
     if (blank(r)) return;
     var k = key(r);
-    if (!k || !oldEmails[k]) out.push(r);
+    if (k ? !oldEmails[k] : !oldSigs[sig(r)]) out.push(r);   // rows without email: skip copies of old rows
   });
   return out;
 }

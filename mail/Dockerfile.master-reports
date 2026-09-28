@@ -1,0 +1,4 @@
+# Report image on top of the new sender image (same files, report entry point).
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ENTRYPOINT ["python", "daily_report.py"]
