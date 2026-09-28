@@ -21,6 +21,17 @@ through the **AUTOMATION MANAGER** menu and executed by Cloud Run workers.
 | Email (existing) | [Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit) | Brand tabs (`Shaaadibells`, `99marketing`, `Staffing`, `Property`, `Skyline capital`) + control / Send Log / Suppression tabs |
 | WhatsApp | [WhatsApp Automation](https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit) | `WhatsApp Contacts` |
 | SMS | [SMS Automation](https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit) | `SMS Contacts` |
+| **Central control** | [Automation Control Center](https://docs.google.com/spreadsheets/d/1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc/edit) | Live counts from all three workbooks (IMPORTRANGE), email emergency-stop/status per brand, and the done / to-do task list |
+
+The **Automation Control Center** is the one sheet to watch and control everything:
+* live per-brand email pipeline (leads, waiting for draft, awaiting approval, approved-to-send, sent,
+  failed, skipped, unsubscribed/bounced, Emergency stop, System status) read from the email workbook;
+* live WhatsApp/SMS contact and consent counts per brand, plus rows with an unknown Brand ID;
+* a task list of what is done and what is still to do.
+Install the same Apps Script there and set Script Properties `UCA_API_BASE_URL` and
+`UCA_EMAIL_SPREADSHEET_ID=18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI` to use the
+AUTOMATION MANAGER menu (Start/Stop per brand and channel, Emergency Stop — including the
+existing email "Emergency stop" cells — View Job Status, Validate Configuration) from this one sheet.
 
 WhatsApp/SMS contacts columns: **A Brand ID** (`shaadi`, `marketing`, `staffing`, `property`, `skyline` —
 must match exactly), B Person Name, C Phone, D Details, E Consent (Yes/No), F Consent Date,
