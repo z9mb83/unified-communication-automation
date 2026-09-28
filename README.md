@@ -46,10 +46,16 @@ Menu **AUTOMATION**: Set up / repair tabs · Mail (import, status) · WhatsApp (
 - **WhatsApp**: runs every 5 minutes when automatic sending is on; per brand it sends up to the brand's limits
   (with a gap it sends one per run). Meta also caps new numbers (about 250 new contacts a day at first).
 
-## Current status
-- The **live email sender still uses the old email sheet** ([Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit)) until the switch-over in `mail/REPAIR.md` ("Moving mail to the master sheet"). The import copies its data into the master sheet without changing it.
-- Reports: 10 AM replies table and 6 PM summary to info@99marketingservices.com (`mail/REPORTS.md`).
+## Current status (live since 28 Sep 2026)
+- **Mail runs from this master sheet.** Cloud Run job `email-sender-master` (every 5 min, 10:00-17:55 Mon-Sat IST)
+  reads the brand tabs, Limits and Mailboxes. The old job `email-sender` is paused; the old email sheet
+  ([Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit)) is kept unchanged as a backup.
+- Reports: 10 AM replies table and 6 PM summary to info@99marketingservices.com, read from this sheet (`mail/REPORTS.md`).
+- Emergency stop for all mail (Cloud Shell, from the unpacked `mail/` bundle): `bash go_master.sh stop`.
+  Per brand: Limits tab, Mail row, On = No.
 - WhatsApp: needs the Meta details in **WhatsApp Setup** and a token (menu). Live sending is off until Settings says Yes.
+- One-off tools (Cloud Shell): `mail/tools/send_one.sh <to> <name>` (single 99 Marketing email) and
+  `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
 ## Safety
 Never commit tokens, `credentials.json`, `.env` or API keys (`.gitignore` blocks the usual names).
