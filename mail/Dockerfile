@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
 COPY brands/ brands/
+COPY brands_master/ brands_master/
 COPY main.py daily_maintenance.py daily_report.py report_core.py ./
 
 ENV PYTHONUNBUFFERED=1

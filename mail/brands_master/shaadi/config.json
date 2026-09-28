@@ -1,0 +1,30 @@
+{
+  "brand_id": "shaadi",
+  "brand_name": "Shaadi Bells",
+  "enabled": true,
+  "gmail_accounts": [
+    "linkwithshaadi@gmail.com",
+    "linkwithshaadi1@gmail.com",
+    "linkwithshaadi9@gmail.com",
+    "linkwithshaadi3@gmail.com",
+    "linkwithshaadi10@gmail.com"
+  ],
+  "sheet_id": "1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc",
+  "control_tab": "Mail Control SB",
+  "lead_tab": "SB",
+  "send_log_tab": "Mail Log SB",
+  "suppression_tab": "Do Not Contact",
+  "token_directory": "brands/shaadi/tokens",
+  "log_directory": "brands/shaadi/logs",
+  "mandatory_cc": "info@shaadi-bells.com",
+  "hourly_limit": 1,
+  "daily_limit": 3,
+  "minimum_gap_minutes": 25,
+  "sending_start_time": "10:00",
+  "sending_end_time": "18:00",
+  "brand_facts": "Shaadi Bells is a private matchmaking consultancy offering personalised matchmaking support, genuine profiles and dedicated relationship-manager support.",
+  "website": "https://www.shaadi-bells.com/",
+  "phone": "+91 7770000559",
+  "legacy_lead_tab": "SB",
+  "initial_emergency_stop": false
+}

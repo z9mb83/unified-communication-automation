@@ -10,7 +10,7 @@ sa()  { gcloud run jobs describe "$1" --region $R --format='value(spec.template.
 echo "== 1. Current images (saved to ~/images-before.txt for rollback)"
 { for j in email-sender email-report-morning email-report-evening; do echo "$j $(img $j)"; done; } | tee ~/images-before.txt
 
-BASE=$(img email-sender)
+BASE=$(img "${BASE_JOB:-email-sender}")   # BASE_JOB=email-sender-master after the switch
 if [[ "$BASE" != *@sha256:* ]]; then   # pin the base to an immutable digest
   BASE=$(gcloud artifacts docker images describe "$BASE" --format='value(image_summary.fully_qualified_digest)')
 fi

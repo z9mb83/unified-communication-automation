@@ -47,7 +47,7 @@ Do not delete such a receipt and blindly resend. If a report execution is delaye
 past midnight, it uses the new execution date; review failed/missed executions in
 Cloud Run. Scheduling triggers at 10:00/18:00; collection and delivery take time.
 
-One-step deploy in Cloud Shell: upload email/ files and run `bash deploy_reports.sh` (updates only
+One-step deploy in Cloud Shell: upload mail/ files and run `bash deploy_reports.sh` (updates only
 the two report jobs and the morning schedule, then does a dry run).
 
 Moving the morning report from 09:00 to 10:00 (one-time, in Cloud Shell):

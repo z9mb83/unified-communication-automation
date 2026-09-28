@@ -159,6 +159,9 @@ def collect_plans(brands, sheet_factory, tz, now):
                 notes.append("No active mailbox")
             if approved == 0 and drafts:
                 notes.append("Approve drafts to send")
+            day_cap = number(settings.get("Brand max per day"), 0)
+            if day_cap > 0:
+                capacity = min(capacity, day_cap)
             plans.append({"brand": brand.brand_name, "approved_waiting": approved,
                           "planned": 0 if stopped else min(approved, capacity),
                           "drafts_awaiting_approval": drafts, "to_draft": to_draft, "note": "; ".join(notes)})
