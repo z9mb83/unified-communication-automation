@@ -220,7 +220,8 @@ function ccSetup() {
 
   // WhatsApp setup + log
   var was = ccEnsureTab_('WhatsApp Setup', ['Brand', 'Phone Number ID', 'WABA ID', 'Template name', 'Language',
-    'Var 1 = column', 'Var 2 = column', 'Var 3 = column', 'Var 4 = column', 'Template check', 'Checked at'], { text: true });
+    'Var 1 = column', 'Var 2 = column', 'Var 3 = column', 'Var 4 = column', 'Template check', 'Checked at',
+    'Header media URL'], { text: true });
   if (was.created || was.sheet.getLastRow() < 2) {
     was.sheet.getRange(2, 1, CC.BRANDS.length, 6).setValues(CC.BRANDS.map(function (b) { return [b[0], '', '', '', 'en', 'A']; }));
   }

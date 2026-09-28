@@ -30,15 +30,16 @@ function waNormalizePhone_(raw, cc) {
   return digits;
 }
 
-/** Meta template JSON -> {supported, reason, named, names[], count, status, language, name} */
+/** Meta template JSON -> {supported, reason, named, names[], count, status, language, name, header} (header = '', 'image', 'video' or 'document') */
 function waParseTemplate_(t) {
   var out = { supported: true, reason: '', named: String(t.parameter_format || '').toUpperCase() === 'NAMED',
-    names: [], count: 0, status: String(t.status || '').toUpperCase(), language: t.language, name: t.name };
+    names: [], count: 0, status: String(t.status || '').toUpperCase(), language: t.language, name: t.name, header: '' };
   (t.components || []).forEach(function (c) {
     var type = String(c.type || '').toUpperCase();
     if (type === 'HEADER') {
       var fmt = String(c.format || 'TEXT').toUpperCase();
-      if (fmt !== 'TEXT') { out.supported = false; out.reason = 'media header (' + fmt + ') is not supported'; }
+      if (fmt === 'IMAGE' || fmt === 'VIDEO' || fmt === 'DOCUMENT') out.header = fmt.toLowerCase();
+      else if (fmt !== 'TEXT') { out.supported = false; out.reason = fmt + ' header is not supported'; }
       else if (/\{\{/.test(c.text || '')) { out.supported = false; out.reason = 'header variable is not supported'; }
     } else if (type === 'BODY') {
       var re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi, m, seen = {};
@@ -58,8 +59,16 @@ function waParseTemplate_(t) {
   return out;
 }
 
-function waBuildComponents_(parsed, vars) {
-  var params = [];
+/** headerUrl: public https link to the header image/video/document (WhatsApp Setup, column L). */
+function waBuildComponents_(parsed, vars, headerUrl) {
+  var params = [], out = [];
+  if (parsed.header) {
+    var url = String(headerUrl || '').trim();
+    if (!/^https:\/\/\S+$/.test(url)) throw new Error('Template has a ' + parsed.header + ' header: put a public https link in WhatsApp Setup > Header media URL');
+    var media = { type: parsed.header };
+    media[parsed.header] = { link: url };
+    out.push({ type: 'header', parameters: [media] });
+  }
   for (var i = 0; i < parsed.count; i++) {
     var v = String(vars[i] === undefined || vars[i] === null ? '' : vars[i]).replace(/\s+/g, ' ').trim();
     if (!v) throw new Error('Var ' + (i + 1) + ' is empty for this row');
@@ -68,7 +77,8 @@ function waBuildComponents_(parsed, vars) {
     if (parsed.named) p.parameter_name = parsed.names[i];
     params.push(p);
   }
-  return params.length ? [{ type: 'body', parameters: params }] : [];
+  if (params.length) out.push({ type: 'body', parameters: params });
+  return out;
 }
 
 function waClassifyError_(httpCode, body) {
@@ -184,7 +194,7 @@ function waSendSelected() {
     for (var i = 0; i < ready.length; i++) {
       var r = ready[i], components;
       try {
-        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }));
+        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }), setup.headerUrl);
       } catch (e) {
         sh.getRange(r.row, CC.COL.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]);
         failed.push('Row ' + r.row + ': ' + e.message); continue;
@@ -226,13 +236,14 @@ function waGraph_(path, token, method, payload) {
   return { code: res.getResponseCode(), body: body };
 }
 
-/** Setup row for a brand: {row, phoneId, waba, template, language, varCols[]} */
+/** Setup row for a brand: {row, phoneId, waba, template, language, varCols[], headerUrl} */
 function waSetup_(code) {
   var rows = ccSheet_('WhatsApp Setup').getDataRange().getDisplayValues();
   for (var i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).trim() === code) {
       return { row: i + 1, phoneId: String(rows[i][1]).trim(), waba: String(rows[i][2]).trim(), template: String(rows[i][3]).trim(),
-        language: String(rows[i][4]).trim() || 'en', varCols: rows[i].slice(5, 9).map(function (c) { return ccColumnIndex_(c); }) };
+        language: String(rows[i][4]).trim() || 'en', varCols: rows[i].slice(5, 9).map(function (c) { return ccColumnIndex_(c); }),
+        headerUrl: String(rows[i][11] || '').trim() };
     }
   }
   return null;
@@ -262,7 +273,8 @@ function waCheckTemplates() {
         var missing = [];
         for (var i = 0; i < p.count; i++) if (!s.varCols[i]) missing.push('Var ' + (i + 1));
         msg = p.status + ' - ' + p.count + ' variable(s)' + (p.supported ? '' : ' - NOT SUPPORTED: ' + p.reason) +
-          (missing.length ? ' - set a column for ' + missing.join(', ') : '');
+          (missing.length ? ' - set a column for ' + missing.join(', ') : '') +
+          (p.header ? (s.headerUrl ? ' - ' + p.header + ' header OK' : ' - ' + p.header + ' header: fill Header media URL') : '');
       } catch (e) { msg = 'Problem: ' + e.message; }
     }
     sh.getRange(s.row, 10, 1, 2).setValues([[msg, Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm')]]);
@@ -374,7 +386,7 @@ function waRun_() {
         }
         var components;
         try {
-          components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? rows[i][c - 1] : ''; }));
+          components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? rows[i][c - 1] : ''; }), setup.headerUrl);
         } catch (e) {
           sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]); marked++; continue;
         }

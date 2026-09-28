@@ -99,7 +99,14 @@ test('template parsing and components', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(g.waBuildComponents_(p, ['Aryan', 'Skyline']))),
     [{ type: 'body', parameters: [{ type: 'text', text: 'Aryan' }, { type: 'text', text: 'Skyline' }] }]);
   assert.throws(() => g.waBuildComponents_(p, ['Aryan', '']));
-  assert.ok(!g.waParseTemplate_({ components: [{ type: 'HEADER', format: 'IMAGE' }] }).supported);
+  const img = g.waParseTemplate_({ components: [{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'No variables' },
+    { type: 'BUTTONS', buttons: [{ type: 'URL', url: 'https://x.com' }] }] });
+  assert.ok(img.supported);
+  assert.strictEqual(img.header, 'image');
+  assert.throws(() => g.waBuildComponents_(img, [], ''), /Header media URL/);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(g.waBuildComponents_(img, [], 'https://x.com/logo.png'))),
+    [{ type: 'header', parameters: [{ type: 'image', image: { link: 'https://x.com/logo.png' } }] }]);
+  assert.ok(!g.waParseTemplate_({ components: [{ type: 'HEADER', format: 'LOCATION' }] }).supported);
   assert.strictEqual(g.waClassifyError_(400, { error: { code: 131050, message: 'x' } }).status, 'Opted out');
 });
 
