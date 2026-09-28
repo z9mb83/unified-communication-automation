@@ -114,6 +114,8 @@ test('setup + import from the old sheet (old sheet is only read)', () => {
     'Mail Control 99M', 'Mail Log 99M', 'OLD - Dashboard', 'OLD - Mail', 'OLD - Settings']) assert.ok(names.includes(t), 'missing tab ' + t);
   assert.deepStrictEqual(names.slice(0, 7), ['Dashboard', 'SB', '99M', '99S', 'PE', 'SC', 'Limits']);
   assert.strictEqual(master.getSheetByName('OLD - Mail').getRange('A2').getValue(), 'old mail row');
+  assert.ok(master.getSheetByName('OLD - Mail').hidden && master.getSheetByName('OLD - Dashboard').hidden);
+  assert.ok(!master.getSheetByName('Dashboard').hidden);
   assert.ok(master.getSheetByName('Mail Control 99M').hidden);
   const ctl = master.getSheetByName('Mail Control 99M');
   assert.deepStrictEqual(ctl.getRange('A2:A10').getValues().map(r => r[0]),
