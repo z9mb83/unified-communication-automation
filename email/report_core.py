@@ -1,5 +1,7 @@
-"""Read-only activity reports. No network calls or email sends in this module."""
+"""Report data and formatting. No network calls or email sends in this module."""
 from __future__ import annotations
+
+from html import escape
 
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
@@ -29,15 +31,33 @@ class Report:
     pending: list[Activity] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     all_replies: list[dict] = field(default_factory=list)  # every reply found, any date
+    reply_start: datetime | None = None  # replies are reported from here (default: start)
+    brand_names: list[str] = field(default_factory=list)
+    lead_names: dict = field(default_factory=dict)  # (brand, email) -> person name
+    plans: list[dict] = field(default_factory=list)  # evening: tomorrow's plan per brand
+
+
+MORNING_HOUR, EVENING_HOUR = 10, 18
 
 
 def window(slot, run_date, tz):
+    """(start, end) of the report period.
+
+    10 AM report: replies from 6 PM the previous day until 10 AM.
+    6 PM report: emails sent today (midnight to 6 PM); replies since the 10 AM report.
+    So every reply appears in exactly one report.
+    """
     midnight = datetime.combine(run_date, time(), tzinfo=tz)
     if slot == "morning":
-        return midnight - timedelta(days=1), midnight
+        return midnight - timedelta(days=1) + timedelta(hours=EVENING_HOUR), midnight.replace(hour=MORNING_HOUR)
     if slot == "evening":
-        return midnight, midnight.replace(hour=18)
+        return midnight, midnight.replace(hour=EVENING_HOUR)
     raise ValueError("Unknown report slot")
+
+
+def reply_window_start(slot, run_date, tz):
+    start, _ = window(slot, run_date, tz)
+    return start if slot == "morning" else start.replace(hour=MORNING_HOUR)
 
 
 def parse_time(value, tz):
@@ -112,36 +132,90 @@ def replies_in_thread(messages, events, end):
     return replies, automated, responded
 
 
+CELL = 'style="border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top"'
+HEAD = 'style="border:1px solid #d0d7de;padding:6px 10px;text-align:left;background:#f3f4f6"'
+
+
+def html_table(headers, rows):
+    head = "".join(f"<th {HEAD}>{escape(str(h))}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td {CELL}>{escape(str(c))}</td>" for c in row) + "</tr>" for row in rows)
+    return f'<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px">\n<tr>{head}</tr>\n{body}\n</table>'
+
+
+def text_table(headers, rows):
+    return "\n".join(" | ".join(str(c) for c in row) for row in [headers, *rows])
+
+
+def _reply_rows(report, items):
+    return [[i, r["time"].strftime("%d %b %H:%M"), r["brand"], report.lead_names.get((r["brand"], r["sender"]), ""),
+             r["sender"], r["mailbox"], r["subject"]] for i, r in enumerate(items, 1)]
+
+
+REPLY_HEADERS = ["#", "Received", "Brand", "Name", "Lead email", "Replied to", "Subject"]
+
+
 def render(report, slot):
-    label = "9 AM previous-day report" if slot == "morning" else "6 PM daily report"
-    subject = f"Email automation | {label} | {report.start:%d %b %Y}"
+    """Returns (subject, plain text body, html body)."""
+    reply_from = report.reply_start or report.start
+    sections = []  # (heading, intro line, headers, rows, empty text)
+    if slot == "morning":
+        subject = f"Replies received till {report.end:%d %b %Y %I:%M %p}"
+        title = "10 AM replies report"
+        period = f"Replies received from {reply_from:%d %b %I:%M %p} to {report.end:%d %b %I:%M %p} (India time)"
+        summary = [f"Replies received: {len(report.replies)}",
+                   f"Auto-replies / bounces: {len(report.automated)}"]
+        sections.append(("Replies received", REPLY_HEADERS, _reply_rows(report, report.replies), "No replies received in this period."))
+    else:
+        subject = f"Daily summary {report.start:%d %b %Y}: sent, replies and plan for tomorrow"
+        title = "6 PM daily summary"
+        period = (f"Emails sent from {report.start:%d %b %I:%M %p} to {report.end:%I:%M %p}; "
+                  f"replies since the 10 AM report ({reply_from:%I:%M %p}) (India time)")
+        per_brand = []
+        for name in report.brand_names:
+            per_brand.append([name, sum(e.brand == name for e in report.sent), sum(e.brand == name for e in report.failed),
+                              sum(r["brand"] == name for r in report.replies)])
+        per_brand.append(["Total", len(report.sent), len(report.failed), len(report.replies)])
+        summary = [f"Emails sent today: {len(report.sent)}",
+                   f"Failed attempts: {len(report.failed)}",
+                   f"Replies received since 10 AM: {len(report.replies)}"]
+        sections.append(("Emails sent today by brand", ["Brand", "Sent", "Failed", "Replies"], per_brand, ""))
+        sections.append(("Replies received since 10 AM", REPLY_HEADERS, _reply_rows(report, report.replies), "No replies received since the 10 AM report."))
+        plan_rows = [[p["brand"], p["approved_waiting"], p["planned"], p["drafts_awaiting_approval"], p["to_draft"], p["note"]]
+                     for p in report.plans]
+        if plan_rows:
+            plan_rows.append(["Total", *(sum(r[i] for r in plan_rows) for i in range(1, 5)), ""])
+        sections.append(("Plan for tomorrow", ["Brand", "Approved, waiting to send", "Will send tomorrow (up to)",
+                                               "Drafts waiting for your approval", "New leads to draft", "Note"],
+                         plan_rows, "Plan unavailable (lead sheets could not be read)."))
+    if report.automated:
+        sections.append(("Auto-replies / bounces (not counted as replies)", REPLY_HEADERS, _reply_rows(report, report.automated), ""))
     if report.warnings:
         subject = "[PARTIAL] " + subject
-    lines = [label, f"Period: {report.start:%d %b %Y %H:%M} to {report.end:%d %b %Y %H:%M} (India time; end excluded)",
-             "", f"Sent: {len(report.sent)} | Failed attempts: {len(report.failed)} | Replies: {len(report.replies)}",
-             f"Automated responses/bounces: {len(report.automated)} | Awaiting reply: {len(report.pending)}", ""]
-    for title, items in (("EMAILS SENT", report.sent), ("FAILED SEND ATTEMPTS", report.failed)):
-        lines.append(title)
-        lines.extend(f"- {e.sent_at:%d %b %H:%M} | {e.brand} | {e.sender} -> {e.recipient} | {e.subject}"
-                     + (f" | {e.error}" if title.startswith("FAILED") else "") for e in items)
-        if not items:
-            lines.append("None recorded.")
-        lines.append("")
-    for title, items in (("REPLIES RECEIVED", report.replies), ("AUTOMATED RESPONSES / BOUNCES", report.automated)):
-        lines.append(title)
-        lines.extend(f"- {r['time']:%d %b %H:%M} | {r['brand']} | {r['sender']} -> {r['mailbox']} | {r['subject']}" for r in items)
-        if not items:
-            lines.append("None found in successfully checked outreach conversations.")
-        lines.append("")
-    lines.append("AWAITING REPLY / FOLLOW-UP REVIEW")
-    lines.extend(f"- {e.brand} | {e.recipient} | last sent {e.sent_at:%d %b %Y %H:%M} from {e.sender} | {e.subject}" for e in report.pending)
-    if not report.pending:
-        lines.append("None found in successfully checked conversations.")
-    lines.extend(["", "Follow-up review covers previous outreach still awaiting a reply at the report cutoff, excluding suppressed/stopped leads.",
-                  "No automatic follow-up emails are sent to leads by this report.",
-                  "Replies are checked in Gmail conversations linked to successful Send Log entries, including older outreach.",
-                  "Replies in unrelated/new threads or delivered only to a separate CC mailbox are outside this report's coverage.",
-                  "Reply subjects and timestamps are included; message bodies are not read."])
+
+    text = [title, period, "", *summary, ""]
+    html = [f'<div style="font-family:Arial,sans-serif;font-size:14px"><h2 style="margin:0 0 4px">{escape(title)}</h2>',
+            f'<p style="color:#555;margin:0 0 12px">{escape(period)}</p>',
+            "<p>" + "<br>".join(f"<b>{escape(line)}</b>" for line in summary) + "</p>"]
+    for heading, headers, rows, empty in sections:
+        text.append(heading.upper())
+        html.append(f'<h3 style="margin:18px 0 6px">{escape(heading)}</h3>')
+        if rows:
+            text.append(text_table(headers, rows))
+            html.append(html_table(headers, rows))
+        else:
+            text.append(empty)
+            html.append(f"<p>{escape(empty)}</p>")
+        text.append("")
+    notes = ["Replies are found in the Gmail conversations of emails this tool sent; a lead who writes a new email "
+             "or replies from another address is not detected. Message text is not read.",
+             "No follow-up emails are sent automatically by this report."]
+    if slot == "evening":
+        notes.insert(0, "\"Will send tomorrow\" is the most the tool can send within each brand's enabled mailbox daily "
+                        "limits; the actual number also depends on sending hours and gaps.")
     if report.warnings:
-        lines.extend(["", "INCOMPLETE DATA — do not interpret missing data as zero activity:", *[f"- {w}" for w in report.warnings]])
-    return subject, "\n".join(lines)
+        text += ["INCOMPLETE DATA - do not read missing data as zero activity:", *[f"- {w}" for w in report.warnings], ""]
+        html.append('<h3 style="margin:18px 0 6px;color:#b42318">Incomplete data - do not read missing data as zero activity</h3><ul>'
+                    + "".join(f"<li>{escape(w)}</li>" for w in report.warnings) + "</ul>")
+    text += notes
+    html.append('<p style="color:#666;font-size:12px">' + "<br>".join(escape(n) for n in notes) + "</p></div>")
+    return subject, "\n".join(text), "\n".join(html)

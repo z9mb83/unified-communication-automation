@@ -1,5 +1,7 @@
-"""Scheduled 09:00/18:00 IST reports; never sends outreach.
+"""Scheduled 10:00 / 18:00 IST reports to info@99marketingservices.com; never sends outreach.
 
+10 AM: replies received since 6 PM yesterday, as a table.
+6 PM: emails sent today, replies since 10 AM, and the plan for tomorrow.
 After the report, replied leads are marked in the lead tabs (columns M:N only).
 """
 from __future__ import annotations
@@ -13,7 +15,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 from reply_sheet import earliest_replies, mark_replied
-from report_core import Report, parse_log, render, replies_in_thread, window
+from report_core import EVENING_HOUR, MORNING_HOUR, Report, parse_log, render, replies_in_thread, reply_window_start, window
 
 RECIPIENT = "info@99marketingservices.com"
 SENDER = "linkwithmarketing@gmail.com"
@@ -29,8 +31,10 @@ def error_kind(error):
     return f"API HTTP {status}" if status else type(error).__name__
 
 
-def collect(brands, start, end, sheet_factory, service_factory):
-    report = Report(start, end)
+def collect(brands, start, end, sheet_factory, service_factory, reply_start=None):
+    report = Report(start, end, reply_start=reply_start)
+    reply_from = reply_start or start
+    report.brand_names = [b.brand_name for b in brands]
     sheets, services, blocked = {}, {}, set()
     events = []
     for brand in brands:
@@ -54,6 +58,8 @@ def collect(brands, start, end, sheet_factory, service_factory):
                         blocked.add((brand.brand_name, str(row[0]).strip().lower()))
                 for row in read(brand.lead_tab, 3, "L"):
                     row = list(row) + [""] * max(0, 12-len(row))
+                    if str(row[0]).strip():
+                        report.lead_names[(brand.brand_name, str(row[1]).strip().lower())] = str(row[0]).strip()
                     if row[5] in {"Unsubscribed", "Bounced", "Replied"} or row[11] in {"Stopped", "Completed", "Replied"}:
                         blocked.add((brand.brand_name, str(row[1]).strip().lower()))
             except Exception as error:
@@ -100,7 +106,7 @@ def collect(brands, start, end, sheet_factory, service_factory):
             for target, found, seen in ((report.replies, replies, seen_reply), (report.automated, automated, seen_auto)):
                 for reply in found:
                     key = (mailbox, reply["id"])
-                    if start <= reply["time"] < end and key not in seen:
+                    if reply_from <= reply["time"] < end and key not in seen:
                         target.append(reply)
                         seen.add(key)
             for event in sent_events:
@@ -117,6 +123,48 @@ def collect(brands, start, end, sheet_factory, service_factory):
     report.automated.sort(key=lambda e: e["time"])
     report.warnings = list(dict.fromkeys(report.warnings))
     return report
+
+
+def collect_plans(brands, sheet_factory, tz, now):
+    """Tomorrow's plan per brand, read from the lead and control tabs (read-only)."""
+    from app.approval_manager import can_generate, is_approved_at
+    from app.limit_manager import read_mailboxes_from_rows
+    from app.utilities import number, yes
+    plans, warnings, sheets = [], [], {}
+    for brand in brands:
+        try:
+            if brand.sheet_id not in sheets:
+                sheets[brand.sheet_id] = sheet_factory(brand.sheet_id)
+            sheet = sheets[brand.sheet_id]
+            quote = lambda tab: "'" + tab.replace("'", "''") + "'"
+            leads = [list(r) + [""] * max(0, 12 - len(r)) for r in sheet.get(f"{quote(brand.lead_tab)}!A3:L")]
+            settings = {str(r[0]).strip(): str(r[1]).strip() for r in sheet.get(f"{quote(brand.control_tab)}!A2:C10") if len(r) >= 2}
+            mailbox_rows = sheet.get(f"{quote(brand.control_tab)}!A13:M{12 + max(len(brand.gmail_accounts), 1)}")
+            mailboxes = read_mailboxes_from_rows(brand, mailbox_rows, [], now, tz,
+                                                 number(settings.get("Default daily limit"), brand.daily_limit),
+                                                 number(settings.get("Default hourly limit"), brand.hourly_limit))
+            active = [m for m in mailboxes if m.enabled and not m.paused]
+            capacity = sum(m.daily_limit for m in active)
+            approved = sum(1 for r in leads if is_approved_at(r, 9))
+            drafts = sum(1 for r in leads if str(r[5]).strip() == "Generated" and not yes(r[9]))
+            to_draft = sum(1 for r in leads if str(r[1]).strip() and can_generate(r))
+            notes = []
+            stopped = yes(settings.get("Emergency stop"))
+            if stopped:
+                notes.append("Emergency stop is ON - nothing will be sent")
+            paused = [m.email for m in mailboxes if m.paused]
+            if paused:
+                notes.append(f"{len(paused)} mailbox(es) paused")
+            if not active:
+                notes.append("No active mailbox")
+            if approved == 0 and drafts:
+                notes.append("Approve drafts to send")
+            plans.append({"brand": brand.brand_name, "approved_waiting": approved,
+                          "planned": 0 if stopped else min(approved, capacity),
+                          "drafts_awaiting_approval": drafts, "to_draft": to_draft, "note": "; ".join(notes)})
+        except Exception as error:
+            warnings.append(f"{brand.brand_name}: tomorrow's plan unavailable ({error_kind(error)}).")
+    return plans, warnings
 
 
 def deliver_once(service, message, receipt):
@@ -168,15 +216,20 @@ def main():
     tz = timezone_for("Asia/Kolkata")
     now = datetime.now(tz)
     start, end = window(args.slot, args.date or now.date(), tz)
-    if not args.dry_run and now.hour < (9 if args.slot == "morning" else 18):
+    if not args.dry_run and now.hour < (MORNING_HOUR if args.slot == "morning" else EVENING_HOUR):
         raise RuntimeError("Report requested before its scheduled cutoff")
     brands = load_all_brand_configs(enabled_only=True)
-    report = collect(brands, start, end, lambda sid: SheetClient(sid, dry_run=True), gmail_service)
-    subject, body = render(report, args.slot)
+    read_only = lambda sid: SheetClient(sid, dry_run=True)
+    report = collect(brands, start, end, read_only, gmail_service, reply_window_start(args.slot, args.date or now.date(), tz))
+    if args.slot == "evening":
+        report.plans, plan_warnings = collect_plans(brands, read_only, tz, now)
+        report.warnings.extend(plan_warnings)
+    subject, body, html = render(report, args.slot)
     if args.dry_run:
         path = Path("reports") / f"{args.slot}-{args.date or now.date()}.txt"
         path.parent.mkdir(exist_ok=True)
         path.write_text(f"To: {RECIPIENT}\nSubject: {subject}\n\n{body}\n", encoding="utf-8")
+        path.with_suffix(".html").write_text(html, encoding="utf-8")
         print(f"Preview saved: {path}; sent={len(report.sent)} replies={len(report.replies)} warnings={len(report.warnings)}. No email sent.")
         for warning in report.warnings:
             print("Warning:", warning)
@@ -191,6 +244,7 @@ def main():
     key = hashlib.sha256(f"{RECIPIENT}|{args.slot}|{now.date()}".encode()).hexdigest()
     message["Message-ID"] = f"<automation-report-{key}@99marketingservices.com>"
     message.set_content(body)
+    message.add_alternative(html, subtype="html")
     print(f"Report {args.slot} {now.date()}: " + deliver_once(service, message, FirestoreReceipt(key)))
     update_reply_columns(brands, report)
 

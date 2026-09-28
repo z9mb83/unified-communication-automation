@@ -5,10 +5,14 @@ Recipient: info@99marketingservices.com
 Sender: linkwithmarketing@gmail.com
 Timezone: Asia/Kolkata
 
-- 09:00 every day: previous calendar day, midnight through midnight.
-- 18:00 every day: current day, midnight through 18:00.
-- All enabled brands: sends, failed send attempts, inbound replies, automated responses,
-  and existing outreach awaiting reply for manual follow-up review.
+- 10:00 every day: replies received from 18:00 the previous day until 10:00, as a table
+  (time, brand, lead name, lead email, mailbox replied to, subject). Auto-replies and bounces
+  are listed separately.
+- 18:00 every day: emails sent today (midnight to 18:00) per brand, failed attempts, replies
+  received since the 10:00 report, and the plan for tomorrow per brand: approved leads
+  waiting, how many can be sent tomorrow (within enabled mailbox daily limits; 0 when
+  Emergency stop is on), drafts waiting for approval, and new leads still to be drafted.
+- Every reply appears in exactly one report. Emails are sent as HTML with a plain-text copy.
 - No lead follow-up messages are automatically sent.
 - Reply tracking: after each report is sent, leads that replied are marked in their brand's
   lead tab: column M "Replied" = Yes and column N "Replied At". Only M:N are written (headers
@@ -26,12 +30,12 @@ this feature. Dockerfile.reports requires BASE_IMAGE. The build runs the unit te
 
 Preview (uses live Sheets/Gmail reads, sends nothing):
 
-    python daily_report.py --slot morning --dry-run
+    python daily_report.py --slot morning --dry-run      # saves reports/<slot>-<date>.txt and .html
     python daily_report.py --slot evening --date 2026-09-24 --dry-run
 
 Production requires existing Google ADC access to Sheets and Firestore and the same
 GMAIL_TOKEN_BUNDLE_FILE secret mount as email-sender. Report scheduling uses Cloud
-Scheduler cron `0 9 * * *` and `0 18 * * *`, timezone Asia/Kolkata, calling two Cloud
+Scheduler cron `0 10 * * *` and `0 18 * * *`, timezone Asia/Kolkata, calling two Cloud
 Run jobs with OAuth authentication. Schedules include Sunday.
 
 Duplicate prevention uses Firestore collection automation_report_receipts, keyed by
@@ -41,7 +45,13 @@ are disabled. A receipt left in status `sending` means delivery is uncertain: ch
 the sender's Sent folder for its deterministic Message-ID before any manual recovery.
 Do not delete such a receipt and blindly resend. If a report execution is delayed
 past midnight, it uses the new execution date; review failed/missed executions in
-Cloud Run. Scheduling triggers at 09:00/18:00; collection and delivery take time.
+Cloud Run. Scheduling triggers at 10:00/18:00; collection and delivery take time.
+
+Moving the morning report from 09:00 to 10:00 (one-time, in Cloud Shell):
+
+    gcloud scheduler jobs update http <morning scheduler job> --schedule "0 10 * * *" --time-zone Asia/Kolkata --location <region>
+
+Until this is changed, a 09:00 trigger stops with "Report requested before its scheduled cutoff".
 
 Deploying the reply-tracking change (rebuild the report image, then point both report jobs
 at it; the email-sender job is not touched):
