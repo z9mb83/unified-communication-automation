@@ -1,4 +1,7 @@
-"""Scheduled 09:00/18:00 IST reports; never sends outreach or updates lead sheets."""
+"""Scheduled 09:00/18:00 IST reports; never sends outreach.
+
+After the report, replied leads are marked in the lead tabs (columns M:N only).
+"""
 from __future__ import annotations
 
 import argparse
@@ -9,6 +12,7 @@ from datetime import date, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
+from reply_sheet import earliest_replies, mark_replied
 from report_core import Report, parse_log, render, replies_in_thread, window
 
 RECIPIENT = "info@99marketingservices.com"
@@ -92,6 +96,7 @@ def collect(brands, start, end, sheet_factory, service_factory):
             thread = services[mailbox].users().threads().get(userId="me", id=thread_id, format="metadata", metadataHeaders=HEADERS).execute()
             replies, automated, responded = replies_in_thread(thread.get("messages", []), sent_events, end)
             replied_leads.update((e.brand, e.recipient) for e in sent_events if (e.sender, e.message_id) in responded)
+            report.all_replies.extend(replies)
             for target, found, seen in ((report.replies, replies, seen_reply), (report.automated, automated, seen_auto)):
                 for reply in found:
                     key = (mailbox, reply["id"])
@@ -175,6 +180,7 @@ def main():
         print(f"Preview saved: {path}; sent={len(report.sent)} replies={len(report.replies)} warnings={len(report.warnings)}. No email sent.")
         for warning in report.warnings:
             print("Warning:", warning)
+        print(f"Replied leads found (not written in dry-run): {len(earliest_replies(report.all_replies))}")
         return
     brand = next(b for b in brands if SENDER in b.gmail_accounts)
     service = gmail_service(brand, SENDER)
@@ -186,6 +192,19 @@ def main():
     message["Message-ID"] = f"<automation-report-{key}@99marketingservices.com>"
     message.set_content(body)
     print(f"Report {args.slot} {now.date()}: " + deliver_once(service, message, FirestoreReceipt(key)))
+    update_reply_columns(brands, report)
+
+
+def update_reply_columns(brands, report):
+    # Runs after the report is sent; a failure here never affects the report.
+    from app.sheet_client import SheetClient
+    try:
+        marked, warnings = mark_replied(brands, earliest_replies(report.all_replies), lambda sid: SheetClient(sid))
+        print(f"Reply status: {marked} lead row(s) newly marked Replied.")
+        for warning in warnings:
+            print("Warning:", warning)
+    except Exception as error:
+        print("Warning: reply status not written:", error_kind(error))
 
 
 if __name__ == "__main__":

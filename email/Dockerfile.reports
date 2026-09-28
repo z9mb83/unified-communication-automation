@@ -1,6 +1,6 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 WORKDIR /app
-COPY daily_report.py report_core.py test_daily_report.py ./
+COPY daily_report.py report_core.py reply_sheet.py test_daily_report.py ./
 RUN python -m unittest -v test_daily_report.py
 ENTRYPOINT ["python", "daily_report.py"]

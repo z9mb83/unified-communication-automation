@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from daily_report import collect, deliver_once, error_kind
+from reply_sheet import earliest_replies, mark_replied, plan_updates
 from report_core import Activity, Report, parse_log, render, replies_in_thread, window
 
 TZ = timezone(timedelta(hours=5, minutes=30))
@@ -124,6 +125,41 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(len(report.sent), 1)
         self.assertEqual(report.pending, [])
         self.assertIn("invalid_grant", report.warnings[0])
+
+    def test_old_replies_are_kept_for_the_sheet_even_outside_window(self):
+        brand = SimpleNamespace(sheet_id="sheet", brand_name="Marketing", send_log_tab="Log", suppression_tab="Suppression", lead_tab="Leads")
+        sheet = Mock()
+        sheet.spreadsheet_metadata.return_value = {"sheets": [{"properties": {"title": tab, "gridProperties": {"rowCount": 100}}} for tab in ["Log", "Suppression", "Leads"]]}
+        sheet.get.side_effect = [[["2026-09-01 10:00:00", "sender@gmail.com", "Lead@Example.com", "Hello", "out", "Sent"]], [], []]
+        service = Mock()
+        service.users().getProfile().execute.return_value = {"emailAddress": "sender@gmail.com"}
+        service.users().messages().get().execute.return_value = {"threadId": "thread"}
+        service.users().threads().get().execute.return_value = {"messages": [message(stamp=at(2, 9))]}
+        report = collect([brand], at(24), at(25), lambda sid: sheet, lambda b, sender: service)
+        self.assertEqual(report.replies, [])
+        self.assertEqual(earliest_replies(report.all_replies), {("Marketing", "lead@example.com"): at(2, 9)})
+
+    def test_plan_marks_only_unmarked_replied_rows_in_m_n(self):
+        rows = [["A", "lead@example.com"], ["B", "other@example.com"], ["C", "done@example.com"] + [""] * 10 + ["Yes"]]
+        replied = {("Marketing", "lead@example.com"): at(2, 9), ("Marketing", "done@example.com"): at(3), ("Other", "other@example.com"): at(3)}
+        self.assertEqual(plan_updates("Leads", rows, replied, "Marketing"), [("'Leads'!M3:N3", [["Yes", "02-Sep-2026 09:00"]])])
+
+    def test_mark_replied_adds_headers_and_never_writes_a_to_l(self):
+        brand = SimpleNamespace(sheet_id="sheet", brand_name="Marketing", lead_tab="Leads")
+        sheet = Mock()
+        sheet.spreadsheet_metadata.return_value = {"sheets": [{"properties": {"title": "Leads", "sheetId": 7, "gridProperties": {"rowCount": 10, "columnCount": 12}}}]}
+        sheet.get.side_effect = [[], [["A", "lead@example.com"]]]
+        marked, warnings = mark_replied([brand], {("Marketing", "lead@example.com"): at(2, 9)}, lambda sid: sheet)
+        self.assertEqual((marked, warnings), (1, []))
+        sheet.batch_update.assert_called_once()
+        sheet.update.assert_called_once_with("'Leads'!M2:N2", [["Replied", "Replied At"]])
+        sheet.batch_values.assert_called_once_with([("'Leads'!M3:N3", [["Yes", "02-Sep-2026 09:00"]])])
+
+    def test_mark_replied_failure_is_a_warning(self):
+        brand = SimpleNamespace(sheet_id="sheet", brand_name="Marketing", lead_tab="Leads")
+        marked, warnings = mark_replied([brand], {("Marketing", "x@y.com"): at(2)}, Mock(side_effect=RuntimeError("boom")))
+        self.assertEqual(marked, 0)
+        self.assertEqual(len(warnings), 1)
 
 
 if __name__ == "__main__":
