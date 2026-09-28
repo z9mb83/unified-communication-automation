@@ -52,8 +52,8 @@ at it; the email-sender job is not touched):
     gcloud run jobs update <morning report job> --image <report image> --region <region>
     gcloud run jobs update <evening report job> --image <report image> --region <region>
 
-The report jobs' service account already writes nothing else; it needs edit access to the
-email workbook (it reads it today) for M:N to be written. If it only has view access, the
+The report jobs' Google account needs edit (not just view) access to the
+email workbook for M:N to be written. If it only has view access, the
 report still sends and logs "could not write reply status".
 
 Unit tests (no network, no sends):
