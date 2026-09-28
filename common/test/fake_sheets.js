@@ -29,7 +29,10 @@ class FakeSheet {
   constructor(ss, name) { this.ss = ss; this.name = name; this.data = {}; this.notes = {}; this.hidden = false; }
   getName() { return this.name; }
   setName(n) { if (this.ss.getSheetByName(n)) throw new Error('duplicate sheet name ' + n); this.name = n; return this; }
-  hideSheet() { this.hidden = true; }
+  hideSheet() {
+    if (this.ss.sheets.filter(x => !x.hidden && x !== this).length === 0) throw new Error("You can't hide all the sheets in a document.");
+    this.hidden = true;
+  }
   _get(r, c) { return (this.data[r] || {})[c] ?? ''; }
   _set(r, c, v) { (this.data[r] = this.data[r] || {})[c] = v; }
   getLastRow() { let m = 0; for (const r in this.data) if (Object.values(this.data[r]).some(v => String(v) !== '')) m = Math.max(m, +r); return m; }
@@ -54,7 +57,7 @@ class FakeSpreadsheet {
   constructor() { this.sheets = []; this.active = null; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n, idx) { const s = new FakeSheet(this, n); if (idx === undefined) this.sheets.push(s); else this.sheets.splice(idx, 0, s); return s; }
-  getSheets() { return this.sheets; }
+  getSheets() { return this.sheets.slice(); }
   setActiveSheet(s) { this.active = s; return s; }
   moveActiveSheet(pos) { const i = this.sheets.indexOf(this.active); this.sheets.splice(i, 1); this.sheets.splice(pos - 1, 0, this.active); }
 }

@@ -171,12 +171,11 @@ function ccYesNo_(range) {
 function ccSetup() {
   var ss = ccSs_();
   // Retire tabs from the earlier master-sheet version (renamed + hidden, never deleted).
-  ['Dashboard', 'Brands', 'Settings', 'Mail', 'WhatsApp', 'SMS', 'WA Templates', 'SMS Templates', 'Send Log', 'Tasks'].forEach(function (name) {
+  // (They are hidden at the end, once the new tabs exist - a sheet must always keep one visible tab.)
+  ['Dashboard', 'Brands', 'Settings', 'Mail', 'WhatsApp', 'SMS', 'WA Templates', 'SMS Templates', 'Send Log', 'Tasks', 'Untitled'].forEach(function (name) {
     var sh = ss.getSheetByName(name);
-    if (sh && !ccIsCurrentTab_(sh)) { sh.setName(ccFreeName_('OLD - ' + name)); sh.hideSheet(); }
+    if (sh && !ccIsCurrentTab_(sh)) sh.setName(ccFreeName_('OLD - ' + name));
   });
-  var untitled = ss.getSheetByName('Untitled');
-  if (untitled) { untitled.setName(ccFreeName_('OLD - Untitled')); untitled.hideSheet(); }
 
   // Settings
   var st = ccEnsureTab_('Settings', ['Setting', 'Value', 'Notes']);
@@ -236,6 +235,7 @@ function ccSetup() {
 
   ccSetupDashboard_();
   ccOrderTabs_();
+  ss.getSheets().forEach(function (sh) { if (sh.getName().indexOf('OLD - ') === 0) sh.hideSheet(); });
   ccAlert_('Set up complete. Next: AUTOMATION > Mail > Import leads from old email sheet (it only reads the old sheet).');
 }
 
