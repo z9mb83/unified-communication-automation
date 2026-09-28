@@ -240,6 +240,11 @@ def main():
         path.write_text(f"To: {RECIPIENT}\nSubject: {subject}\n\n{body}\n", encoding="utf-8")
         path.with_suffix(".html").write_text(html, encoding="utf-8")
         print(f"Preview saved: {path}; sent={len(report.sent)} replies={len(report.replies)} warnings={len(report.warnings)}. No email sent.")
+        print("===== REPORT PREVIEW (not sent) =====")
+        print(f"To: {RECIPIENT}")
+        print(f"Subject: {subject}")
+        print(body)
+        print("===== END PREVIEW =====")
         for warning in report.warnings:
             print("Warning:", warning)
         print(f"Replied leads found (not written in dry-run): {len(earliest_replies(report.all_replies))}")
