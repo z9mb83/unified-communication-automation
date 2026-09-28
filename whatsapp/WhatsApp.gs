@@ -210,16 +210,13 @@ function waSendSelected() {
 
 function waSaveToken() {
   var ui = SpreadsheetApp.getUi();
-  var who = ui.prompt('Save WhatsApp access token', 'Brand code (SB, 99M, 99S, PE, SC) or ALL for one token used by every brand:', ui.ButtonSet.OK_CANCEL);
-  if (who.getSelectedButton() !== ui.Button.OK) return;
-  var code = String(who.getResponseText()).trim().toUpperCase();
-  if (code !== 'ALL' && !ccBrand_(code)) { ui.alert('Unknown brand code: ' + code); return; }
-  var tok = ui.prompt('Paste the permanent access token for ' + code, 'It is stored privately in this script (not in any cell).', ui.ButtonSet.OK_CANCEL);
+  var tok = ui.prompt('Save WhatsApp access token',
+    'Paste the permanent access token (one token is used by every brand).\nIt is stored privately in this script, not in any cell.', ui.ButtonSet.OK_CANCEL);
   if (tok.getSelectedButton() !== ui.Button.OK) return;
   var value = String(tok.getResponseText()).trim();
-  if (value.length < 20) { ui.alert('That does not look like a token. Nothing saved.'); return; }
-  PropertiesService.getScriptProperties().setProperty('WA_TOKEN_' + code, value);
-  ui.alert('Token saved for ' + code + '. Next: WhatsApp > Check templates.');
+  if (value.length < 20 || /\s/.test(value)) { ui.alert('That does not look like a token (too short or has spaces). Nothing saved.'); return; }
+  PropertiesService.getScriptProperties().setProperty('WA_TOKEN_ALL', value);
+  ui.alert('Token saved (ends with ...' + value.slice(-4) + '). Next: AUTOMATION > WhatsApp > Check templates.');
 }
 
 function waToken_(code) {

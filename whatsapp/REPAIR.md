@@ -7,7 +7,7 @@ It sends each brand's **one approved Meta template** to rows in that brand's tab
 1. Meta Business > WhatsApp Manager: note the **WABA ID**, the brand's **Phone Number ID**, and an **approved template** name + language.
 2. Sheet tab **WhatsApp Setup**: fill Phone Number ID, WABA ID, Template name, Language (e.g. `en`, `en_US`),
    and for each template variable the column that fills it (`A` = Person / Company, `B` = Email, `C` = Details …).
-3. Menu **AUTOMATION > WhatsApp > Save access token** (brand code, or ALL for one token). Stored privately in the script.
+3. Menu **AUTOMATION > WhatsApp > Save access token**: paste the token in the one box (used by every brand). Stored privately in the script.
 4. **Check templates** — shows APPROVED + number of variables, or what is wrong.
 5. **Limits** tab: set the WhatsApp row for the brand to On = Yes and its limits.
 6. **Settings**: add your own number to *WhatsApp test numbers*; *WhatsApp live sending* stays **No** until tested.
