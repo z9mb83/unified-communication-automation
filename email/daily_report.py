@@ -205,7 +205,11 @@ def main():
     parser.add_argument("--slot", choices=["morning", "evening"], required=True)
     parser.add_argument("--dry-run", action="store_true", help="Read data and save preview; no email or receipt write.")
     parser.add_argument("--date", type=date.fromisoformat, help="Schedule date, for dry-run only (YYYY-MM-DD).")
+    parser.add_argument("--sample", action="store_true",
+                        help="Send one [SAMPLE] copy now (period ends now); does not affect the scheduled report or the sheet.")
     args = parser.parse_args()
+    if args.sample and (args.dry_run or args.date):
+        parser.error("--sample cannot be combined with --dry-run or --date")
     if args.date and not args.dry_run:
         parser.error("--date is only allowed with --dry-run")
     from app.config_loader import load_all_brand_configs, load_runtime_config
@@ -216,7 +220,9 @@ def main():
     tz = timezone_for("Asia/Kolkata")
     now = datetime.now(tz)
     start, end = window(args.slot, args.date or now.date(), tz)
-    if not args.dry_run and now.hour < (MORNING_HOUR if args.slot == "morning" else EVENING_HOUR):
+    if args.sample:
+        end = min(end, now.replace(second=0, microsecond=0))
+    elif not args.dry_run and now.hour < (MORNING_HOUR if args.slot == "morning" else EVENING_HOUR):
         raise RuntimeError("Report requested before its scheduled cutoff")
     brands = load_all_brand_configs(enabled_only=True)
     read_only = lambda sid: SheetClient(sid, dry_run=True)
@@ -225,6 +231,8 @@ def main():
         report.plans, plan_warnings = collect_plans(brands, read_only, tz, now)
         report.warnings.extend(plan_warnings)
     subject, body, html = render(report, args.slot)
+    if args.sample:
+        subject = f"[SAMPLE] {subject}"
     if args.dry_run:
         path = Path("reports") / f"{args.slot}-{args.date or now.date()}.txt"
         path.parent.mkdir(exist_ok=True)
@@ -241,12 +249,14 @@ def main():
         raise RuntimeError("Report sender OAuth profile mismatch")
     message = EmailMessage()
     message["From"], message["To"], message["Subject"] = SENDER, RECIPIENT, subject
-    key = hashlib.sha256(f"{RECIPIENT}|{args.slot}|{now.date()}".encode()).hexdigest()
+    receipt_id = f"{RECIPIENT}|{args.slot}|{now.date()}" + (f"|sample|{now:%H%M}" if args.sample else "")
+    key = hashlib.sha256(receipt_id.encode()).hexdigest()
     message["Message-ID"] = f"<automation-report-{key}@99marketingservices.com>"
     message.set_content(body)
     message.add_alternative(html, subtype="html")
-    print(f"Report {args.slot} {now.date()}: " + deliver_once(service, message, FirestoreReceipt(key)))
-    update_reply_columns(brands, report)
+    print(f"Report {args.slot} {now.date()}{' SAMPLE' if args.sample else ''}: " + deliver_once(service, message, FirestoreReceipt(key)))
+    if not args.sample:
+        update_reply_columns(brands, report)
 
 
 def update_reply_columns(brands, report):
