@@ -5,14 +5,16 @@ Recipient: info@99marketingservices.com
 Sender: linkwithmarketing@gmail.com
 Timezone: Asia/Kolkata
 
-- 10:00 every day: replies received from 18:00 the previous day until 10:00, as a table
-  (time, brand, lead name, lead email, mailbox replied to, subject). Auto-replies and bounces
-  are listed separately.
-- 18:00 every day: emails sent today (midnight to 18:00) per brand, failed attempts, replies
-  received since the 10:00 report, and the plan for tomorrow per brand: approved leads
-  waiting, how many can be sent tomorrow (within enabled mailbox daily limits; 0 when
-  Emergency stop is on), drafts waiting for approval, and new leads still to be drafted.
-- Every reply appears in exactly one report. Emails are sent as HTML with a plain-text copy.
+- Both reports (10:00 and 18:00) show the LAST 7 DAYS:
+  - Replies table, newest first: Brand | Replied from (email) | Name / company | Phone |
+    Replied on | We emailed them on | New? ("NEW" = replied since the previous report).
+  - By brand: emails sent in 7 days, people who replied, reply rate.
+  - Auto-replies and bounces are listed separately and not counted.
+- 18:00 also shows emails sent today (+ failed) and the plan for tomorrow per brand: approved
+  leads waiting, how many can be sent tomorrow (within mailbox limits; 0 when Emergency stop
+  is on), drafts waiting for approval, and new leads still to be drafted.
+- Emails are sent as HTML with a plain-text copy.
+- Deploy a report change: `bash go_master.sh reports` (sender untouched; ends with a preview that sends nothing).
 - No lead follow-up messages are automatically sent.
 - Reply tracking: after each report is sent, leads that replied are marked in their brand's
   lead tab: column M "Replied" = Yes and column N "Replied At". Only M:N are written (headers

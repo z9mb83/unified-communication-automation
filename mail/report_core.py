@@ -35,9 +35,13 @@ class Report:
     brand_names: list[str] = field(default_factory=list)
     lead_names: dict = field(default_factory=dict)  # (brand, email) -> person name
     plans: list[dict] = field(default_factory=list)  # evening: tomorrow's plan per brand
+    lead_phones: dict = field(default_factory=dict)  # (brand, email) -> phone
+    new_from: datetime | None = None  # replies after this are marked NEW (since the previous report)
+    week_sent: list[Activity] = field(default_factory=list)  # sent in the last 7 days
 
 
 MORNING_HOUR, EVENING_HOUR = 10, 18
+DAYS = 7  # both reports show the last 7 days
 
 
 def window(slot, run_date, tz):
@@ -123,7 +127,7 @@ def replies_in_thread(messages, events, end):
             continue
         event = max(related, key=lambda e: e.sent_at)
         item = dict(brand=event.brand, mailbox=event.sender, sender=sender,
-                    subject=headers.get("subject", ""), time=stamp, id=message["id"])
+                    subject=headers.get("subject", ""), time=stamp, id=message["id"], sent_at=event.sent_at)
         if auto:
             automated.append(item)
         else:
@@ -147,39 +151,62 @@ def text_table(headers, rows):
 
 
 def _reply_rows(report, items):
-    return [[i, r["time"].strftime("%d %b %H:%M"), r["brand"], report.lead_names.get((r["brand"], r["sender"]), ""),
-             r["sender"], r["mailbox"], r["subject"]] for i, r in enumerate(items, 1)]
+    new_from = report.new_from
+    rows = []
+    for r in sorted(items, key=lambda r: r["time"], reverse=True):
+        key = (r["brand"], r["sender"])
+        rows.append([r["brand"], r["sender"], report.lead_names.get(key, ""), report.lead_phones.get(key, ""),
+                     r["time"].strftime("%d %b, %I:%M %p"),
+                     r["sent_at"].strftime("%d %b") if r.get("sent_at") else "",
+                     "NEW" if new_from and r["time"] >= new_from else ""])
+    return rows
 
 
-REPLY_HEADERS = ["#", "Received", "Brand", "Name", "Lead email", "Replied to", "Subject"]
+REPLY_HEADERS = ["Brand", "Replied from (email)", "Name / company", "Phone", "Replied on", "We emailed them on", "New?"]
+
+
+def _brand_rows(report, slot):
+    rows = []
+    for name in report.brand_names:
+        sent = sum(e.brand == name for e in report.week_sent)
+        replies = len({r["sender"] for r in report.replies if r["brand"] == name})
+        row = [name, sent, replies, f"{replies * 100 / sent:.0f}%" if sent else "-"]
+        if slot == "evening":
+            row.insert(1, sum(e.brand == name for e in report.sent))
+        rows.append(row)
+    sent = len(report.week_sent)
+    replies = len({(r["brand"], r["sender"]) for r in report.replies})
+    total = ["Total", sent, replies, f"{replies * 100 / sent:.0f}%" if sent else "-"]
+    if slot == "evening":
+        total.insert(1, len(report.sent))
+    rows.append(total)
+    headers = ["Brand", f"Emails sent (last {DAYS} days)", "People who replied", "Reply rate"]
+    if slot == "evening":
+        headers.insert(1, "Sent today")
+    return headers, rows
 
 
 def render(report, slot):
     """Returns (subject, plain text body, html body)."""
-    reply_from = report.reply_start or report.start
-    sections = []  # (heading, intro line, headers, rows, empty text)
+    since = report.reply_start or report.start
+    new = [r for r in report.replies if report.new_from and r["time"] >= report.new_from]
+    people = len({(r["brand"], r["sender"]) for r in report.replies})
+    period = f"Last {DAYS} days: {since:%d %b} to {report.end:%d %b %Y, %I:%M %p} (India time)"
+    summary = [f"New replies since the last report: {len(new)}",
+               f"People who replied in the last {DAYS} days: {people}",
+               f"Emails sent in the last {DAYS} days: {len(report.week_sent)}"]
     if slot == "morning":
-        subject = f"Replies received till {report.end:%d %b %Y %I:%M %p}"
         title = "10 AM replies report"
-        period = f"Replies received from {reply_from:%d %b %I:%M %p} to {report.end:%d %b %I:%M %p} (India time)"
-        summary = [f"Replies received: {len(report.replies)}",
-                   f"Auto-replies / bounces: {len(report.automated)}"]
-        sections.append(("Replies received", REPLY_HEADERS, _reply_rows(report, report.replies), "No replies received in this period."))
+        subject = f"Replies report {report.end:%d %b}: {len(new)} new, {people} in last {DAYS} days"
     else:
-        subject = f"Daily summary {report.start:%d %b %Y}: sent, replies and plan for tomorrow"
         title = "6 PM daily summary"
-        period = (f"Emails sent from {report.start:%d %b %I:%M %p} to {report.end:%I:%M %p}; "
-                  f"replies since the 10 AM report ({reply_from:%I:%M %p}) (India time)")
-        per_brand = []
-        for name in report.brand_names:
-            per_brand.append([name, sum(e.brand == name for e in report.sent), sum(e.brand == name for e in report.failed),
-                              sum(r["brand"] == name for r in report.replies)])
-        per_brand.append(["Total", len(report.sent), len(report.failed), len(report.replies)])
-        summary = [f"Emails sent today: {len(report.sent)}",
-                   f"Failed attempts: {len(report.failed)}",
-                   f"Replies received since 10 AM: {len(report.replies)}"]
-        sections.append(("Emails sent today by brand", ["Brand", "Sent", "Failed", "Replies"], per_brand, ""))
-        sections.append(("Replies received since 10 AM", REPLY_HEADERS, _reply_rows(report, report.replies), "No replies received since the 10 AM report."))
+        subject = f"Daily summary {report.end:%d %b}: {len(report.sent)} sent today, {len(new)} new replies"
+        summary.insert(0, f"Emails sent today: {len(report.sent)} (failed: {len(report.failed)})")
+    brand_headers, brand_rows = _brand_rows(report, slot)
+    sections = [(f"Replies in the last {DAYS} days (newest first)", REPLY_HEADERS, _reply_rows(report, report.replies),
+                 f"No replies in the last {DAYS} days."),
+                (f"By brand", brand_headers, brand_rows, "")]
+    if slot == "evening":
         plan_rows = [[p["brand"], p["approved_waiting"], p["planned"], p["drafts_awaiting_approval"], p["to_draft"], p["note"]]
                      for p in report.plans]
         if plan_rows:
@@ -188,7 +215,8 @@ def render(report, slot):
                                                "Drafts waiting for your approval", "New leads to draft", "Note"],
                          plan_rows, "Plan unavailable (lead sheets could not be read)."))
     if report.automated:
-        sections.append(("Auto-replies / bounces (not counted as replies)", REPLY_HEADERS, _reply_rows(report, report.automated), ""))
+        sections.append((f"Auto-replies and bounces (not counted as replies)", REPLY_HEADERS,
+                         _reply_rows(report, report.automated), ""))
     if report.warnings:
         subject = "[PARTIAL] " + subject
 
@@ -206,12 +234,10 @@ def render(report, slot):
             text.append(empty)
             html.append(f"<p>{escape(empty)}</p>")
         text.append("")
-    notes = ["Replies are found in the Gmail conversations of emails this tool sent; a lead who writes a new email "
-             "or replies from another address is not detected. Message text is not read.",
-             "No follow-up emails are sent automatically by this report."]
+    notes = ["NEW = replied since the previous report. Replies are also marked in the brand tab (Replied / Replied at).",
+             "Only replies in the same Gmail conversation as our email are detected."]
     if slot == "evening":
-        notes.insert(0, "\"Will send tomorrow\" is the most the tool can send within each brand's enabled mailbox daily "
-                        "limits; the actual number also depends on sending hours and gaps.")
+        notes.insert(0, "\"Will send tomorrow\" is the most the tool can send within each brand's mailbox limits.")
     if report.warnings:
         text += ["INCOMPLETE DATA - do not read missing data as zero activity:", *[f"- {w}" for w in report.warnings], ""]
         html.append('<h3 style="margin:18px 0 6px;color:#b42318">Incomplete data - do not read missing data as zero activity</h3><ul>'

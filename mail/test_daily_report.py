@@ -77,18 +77,24 @@ class ReportsTest(unittest.TestCase):
         subject, body, html = render(report, "morning")
         self.assertTrue(subject.startswith("[PARTIAL]"))
         self.assertIn("INCOMPLETE DATA", body)
-        self.assertIn("No follow-up emails", body)
+        self.assertIn("NEW = replied since the previous report", body)
         self.assertIn("Incomplete data", html)
 
-    def test_morning_has_reply_table_with_names(self):
-        reply = dict(brand="Marketing", mailbox="sender@gmail.com", sender="lead@example.com", subject="Re: <Hi>", time=at(25, 8), id="r")
-        report = Report(at(24, 18), at(25, 10), replies=[reply], lead_names={("Marketing", "lead@example.com"): "Aryan"})
+    def test_morning_has_7_day_reply_table_with_brand_email_name_phone(self):
+        old = dict(brand="Marketing", mailbox="s@gmail.com", sender="old@example.com", subject="Re", time=at(20, 12), id="o", sent_at=at(19, 11))
+        new = dict(brand="Marketing", mailbox="s@gmail.com", sender="lead@example.com", subject="Re", time=at(25, 8), id="r", sent_at=at(23, 11))
+        report = Report(at(24, 18), at(25, 10), reply_start=at(18, 10), new_from=at(24, 18), replies=[old, new],
+                        brand_names=["Marketing"], week_sent=[event(stamp=at(19, 11)), event(stamp=at(23, 11))],
+                        lead_names={("Marketing", "lead@example.com"): "Aryan <Co>"},
+                        lead_phones={("Marketing", "lead@example.com"): "+91 98765"})
         subject, body, html = render(report, "morning")
-        self.assertIn("Replies received till 25 Sep 2026 10:00 AM", subject)
-        self.assertIn("Replies received: 1", body)
-        self.assertIn("<td", html)
-        self.assertIn("Aryan", html)
-        self.assertIn("Re: &lt;Hi&gt;", html)
+        self.assertEqual("Replies report 25 Sep: 1 new, 2 in last 7 days", subject)
+        self.assertIn("Last 7 days: 18 Sep", body)
+        self.assertIn("Marketing | lead@example.com | Aryan <Co> | +91 98765 | 25 Sep, 08:00 AM | 23 Sep | NEW", body)
+        self.assertIn("Marketing | old@example.com |  |  | 20 Sep, 12:00 PM | 19 Sep | ", body)
+        self.assertLess(body.index("lead@example.com"), body.index("old@example.com"))  # newest first
+        self.assertIn("Marketing | 2 | 2 | 100%", body)
+        self.assertIn("Aryan &lt;Co&gt;", html)
 
     def test_evening_has_sent_counts_replies_and_plan(self):
         report = Report(at(25), at(25, 18), reply_start=at(25, 10), brand_names=["Marketing", "Staffing"],
@@ -96,9 +102,10 @@ class ReportsTest(unittest.TestCase):
                         plans=[{"brand": "Marketing", "approved_waiting": 40, "planned": 15, "drafts_awaiting_approval": 3, "to_draft": 2, "note": ""},
                                {"brand": "Staffing", "approved_waiting": 5, "planned": 0, "drafts_awaiting_approval": 0, "to_draft": 0, "note": "Emergency stop is ON - nothing will be sent"}])
         subject, body, html = render(report, "evening")
-        self.assertIn("plan for tomorrow", subject)
+        self.assertEqual("Daily summary 25 Sep: 1 sent today, 0 new replies", subject)
         self.assertIn("Emails sent today: 1", body)
-        self.assertIn("No replies received since the 10 AM report.", body)
+        self.assertIn("No replies in the last 7 days.", body)
+        self.assertIn("Marketing | 1 | 0 | 0 | -", body)
         self.assertIn("Total | 45 | 15 | 3 | 2 |", body)
         self.assertIn("Emergency stop is ON", html)
 
@@ -142,6 +149,19 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(report.pending, [])
         sheet.update.assert_not_called()
         service.users().messages().send.assert_not_called()
+
+    def test_collect_reads_phone_and_7_day_sends_from_master_tab(self):
+        brand = SimpleNamespace(sheet_id="sheet", brand_name="Marketing", send_log_tab="Log", suppression_tab="Suppression", lead_tab="Leads")
+        sheet = Mock()
+        sheet.spreadsheet_metadata.return_value = {"sheets": [{"properties": {"title": tab, "gridProperties": {"rowCount": 100, "columnCount": 20}}} for tab in ["Log", "Suppression", "Leads"]]}
+        log = [["2026-09-10 10:00:00", "sender@gmail.com", "a@x.com", "Hi", "m1", "Sent"],
+               ["2026-09-20 10:00:00", "sender@gmail.com", "b@x.com", "Hi", "m2", "Sent"]]
+        lead = ["Aryan", "b@x.com"] + [""] * 12 + ["+91 99999"]
+        sheet.get.side_effect = [log, [], [lead]]
+        report = collect([brand], at(24), at(25), lambda sid: sheet, Mock(side_effect=ValueError("x")), reply_start=at(18))
+        self.assertEqual([e.recipient for e in report.week_sent], ["b@x.com"])
+        self.assertEqual(report.lead_phones[("Marketing", "b@x.com")], "+91 99999")
+        self.assertIn("A3:O100", sheet.get.call_args_list[2].args[0])
 
     def test_bad_mailbox_is_unknown_not_pending(self):
         brand = SimpleNamespace(sheet_id="sheet", brand_name="Marketing", send_log_tab="Log", suppression_tab="Suppression", lead_tab="Leads")
