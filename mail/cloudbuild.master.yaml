@@ -1,0 +1,8 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args: ['build', '-f', 'Dockerfile.master', '--build-arg', 'BASE_IMAGE=${_BASE}', '-t', '${_SENDER}', '.']
+- name: gcr.io/cloud-builders/docker
+  args: ['push', '${_SENDER}']
+- name: gcr.io/cloud-builders/docker
+  args: ['build', '-f', 'Dockerfile.master-reports', '--build-arg', 'BASE_IMAGE=${_SENDER}', '-t', '${_REPORTS}', '.']
+images: ['${_SENDER}', '${_REPORTS}']
