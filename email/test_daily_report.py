@@ -4,9 +4,9 @@ from email.message import EmailMessage
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from daily_report import collect, deliver_once, error_kind
+from daily_report import collect, collect_plans, deliver_once, error_kind
 from reply_sheet import earliest_replies, mark_replied, plan_updates
-from report_core import Activity, Report, parse_log, render, replies_in_thread, window
+from report_core import Activity, Report, parse_log, render, replies_in_thread, reply_window_start, window
 
 TZ = timezone(timedelta(hours=5, minutes=30))
 
@@ -28,8 +28,12 @@ def message(mid="reply", stamp=None, sender="lead@example.com", labels=None, aut
 
 
 class ReportsTest(unittest.TestCase):
-    def test_morning_full_previous_calendar_day(self):
-        self.assertEqual(window("morning", date(2026, 9, 25), TZ), (at(24), at(25)))
+    def test_morning_is_6pm_yesterday_to_10am(self):
+        self.assertEqual(window("morning", date(2026, 9, 25), TZ), (at(24, 18), at(25, 10)))
+        self.assertEqual(reply_window_start("morning", date(2026, 9, 25), TZ), at(24, 18))
+
+    def test_evening_replies_start_at_10am(self):
+        self.assertEqual(reply_window_start("evening", date(2026, 9, 25), TZ), at(25, 10))
 
     def test_evening_midnight_to_18(self):
         self.assertEqual(window("evening", date(2026, 9, 25), TZ), (at(25), at(25, 18)))
@@ -70,10 +74,33 @@ class ReportsTest(unittest.TestCase):
 
     def test_partial_report_is_explicit(self):
         report = Report(at(24), at(25), warnings=["Mailbox unavailable"])
-        subject, body = render(report, "morning")
+        subject, body, html = render(report, "morning")
         self.assertTrue(subject.startswith("[PARTIAL]"))
         self.assertIn("INCOMPLETE DATA", body)
-        self.assertIn("No automatic follow-up", body)
+        self.assertIn("No follow-up emails", body)
+        self.assertIn("Incomplete data", html)
+
+    def test_morning_has_reply_table_with_names(self):
+        reply = dict(brand="Marketing", mailbox="sender@gmail.com", sender="lead@example.com", subject="Re: <Hi>", time=at(25, 8), id="r")
+        report = Report(at(24, 18), at(25, 10), replies=[reply], lead_names={("Marketing", "lead@example.com"): "Aryan"})
+        subject, body, html = render(report, "morning")
+        self.assertIn("Replies received till 25 Sep 2026 10:00 AM", subject)
+        self.assertIn("Replies received: 1", body)
+        self.assertIn("<td", html)
+        self.assertIn("Aryan", html)
+        self.assertIn("Re: &lt;Hi&gt;", html)
+
+    def test_evening_has_sent_counts_replies_and_plan(self):
+        report = Report(at(25), at(25, 18), reply_start=at(25, 10), brand_names=["Marketing", "Staffing"],
+                        sent=[event(stamp=at(25, 11))],
+                        plans=[{"brand": "Marketing", "approved_waiting": 40, "planned": 15, "drafts_awaiting_approval": 3, "to_draft": 2, "note": ""},
+                               {"brand": "Staffing", "approved_waiting": 5, "planned": 0, "drafts_awaiting_approval": 0, "to_draft": 0, "note": "Emergency stop is ON - nothing will be sent"}])
+        subject, body, html = render(report, "evening")
+        self.assertIn("plan for tomorrow", subject)
+        self.assertIn("Emails sent today: 1", body)
+        self.assertIn("No replies received since the 10 AM report.", body)
+        self.assertIn("Total | 45 | 15 | 3 | 2 |", body)
+        self.assertIn("Emergency stop is ON", html)
 
     def test_duplicate_receipt_does_not_send(self):
         service, receipt = Mock(), Mock()
@@ -160,6 +187,26 @@ class ReportsTest(unittest.TestCase):
         marked, warnings = mark_replied([brand], {("Marketing", "x@y.com"): at(2)}, Mock(side_effect=RuntimeError("boom")))
         self.assertEqual(marked, 0)
         self.assertEqual(len(warnings), 1)
+
+    def test_plans_count_approved_capacity_and_emergency_stop(self):
+        brand = SimpleNamespace(sheet_id="s", brand_name="Marketing", lead_tab="Leads", control_tab="Control", gmail_accounts=["a@gmail.com", "b@gmail.com"],
+                                daily_limit=3, hourly_limit=1)
+        leads = [["A", "a@x.com", "", "S", "B", "Generated", "", "", "", "Yes"],
+                 ["B", "b@x.com", "", "S", "B", "Approved", "", "", "", "Yes"],
+                 ["C", "c@x.com", "", "S", "B", "Generated", "", "", "", ""],
+                 ["D", "d@x.com", "", "", "", "Pending"],
+                 ["E", "e@x.com", "", "S", "B", "Sent", "", "", "", "Yes"]]
+        mailboxes = [["a@gmail.com", "Yes", "Stage 1", "5"] + [""] * 9, ["b@gmail.com", "Yes", "Stage 1", "4", "", "", "", "", "", "", "Yes"] + [""] * 2]
+        sheet = Mock()
+        sheet.get.side_effect = [leads, [["Default daily limit", "3"]], mailboxes]
+        plans, warnings = collect_plans([brand], lambda sid: sheet, TZ, at(25, 18))
+        self.assertEqual(warnings, [])
+        self.assertEqual(plans[0], {"brand": "Marketing", "approved_waiting": 2, "planned": 2, "drafts_awaiting_approval": 1, "to_draft": 1, "note": "1 mailbox(es) paused"})
+        sheet.get.side_effect = [leads, [["Emergency stop", "Yes"]], mailboxes]
+        plans, _ = collect_plans([brand], lambda sid: sheet, TZ, at(25, 18))
+        self.assertEqual(plans[0]["planned"], 0)
+        self.assertIn("Emergency stop", plans[0]["note"])
+        sheet.update.assert_not_called()
 
 
 if __name__ == "__main__":
