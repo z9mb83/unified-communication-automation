@@ -1,7 +1,7 @@
 """Scheduled 10:00 / 18:00 IST reports to info@99marketingservices.com; never sends outreach.
 
-10 AM: replies received since 6 PM yesterday, as a table.
-6 PM: emails sent today, replies since 10 AM, and the plan for tomorrow.
+Both reports show the last 7 days of replies (NEW = since the previous report) and sends by brand.
+6 PM also shows emails sent today and the plan for tomorrow.
 After the report, replied leads are marked in the lead tabs (columns M:N only).
 """
 from __future__ import annotations
@@ -10,12 +10,12 @@ import argparse
 import base64
 import hashlib
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 
 from reply_sheet import earliest_replies, mark_replied
-from report_core import EVENING_HOUR, MORNING_HOUR, Report, parse_log, render, replies_in_thread, reply_window_start, window
+from report_core import DAYS, EVENING_HOUR, MORNING_HOUR, Report, parse_log, render, replies_in_thread, reply_window_start, window
 
 RECIPIENT = "info@99marketingservices.com"
 SENDER = "linkwithmarketing@gmail.com"
@@ -31,8 +31,8 @@ def error_kind(error):
     return f"API HTTP {status}" if status else type(error).__name__
 
 
-def collect(brands, start, end, sheet_factory, service_factory, reply_start=None):
-    report = Report(start, end, reply_start=reply_start)
+def collect(brands, start, end, sheet_factory, service_factory, reply_start=None, new_from=None):
+    report = Report(start, end, reply_start=reply_start, new_from=new_from)
     reply_from = reply_start or start
     report.brand_names = [b.brand_name for b in brands]
     sheets, services, blocked = {}, {}, set()
@@ -51,15 +51,20 @@ def collect(brands, start, end, sheet_factory, service_factory, reply_start=None
             report.warnings.extend(warnings)
             report.sent.extend(e for e in parsed if e.result == "Sent" and start <= e.sent_at < end)
             report.failed.extend(e for e in parsed if e.result == "Failed" and start <= e.sent_at < end)
+            report.week_sent.extend(e for e in parsed if e.result == "Sent" and reply_from <= e.sent_at < end)
             candidates = [e for e in parsed if e.result == "Sent" and e.sent_at < end]
             try:
                 for row in read(brand.suppression_tab, 2, "C"):
                     if row:
                         blocked.add((brand.brand_name, str(row[0]).strip().lower()))
-                for row in read(brand.lead_tab, 3, "L"):
-                    row = list(row) + [""] * max(0, 12-len(row))
+                wide = props[brand.lead_tab]["gridProperties"].get("columnCount", 0) >= 15
+                for row in read(brand.lead_tab, 3, "O" if wide else "L"):
+                    row = list(row) + [""] * max(0, 15-len(row))
+                    lead = (brand.brand_name, str(row[1]).strip().lower())
                     if str(row[0]).strip():
-                        report.lead_names[(brand.brand_name, str(row[1]).strip().lower())] = str(row[0]).strip()
+                        report.lead_names[lead] = str(row[0]).strip()
+                    if str(row[14]).strip():
+                        report.lead_phones[lead] = str(row[14]).strip()
                     if row[5] in {"Unsubscribed", "Bounced", "Replied"} or row[11] in {"Stopped", "Completed", "Replied"}:
                         blocked.add((brand.brand_name, str(row[1]).strip().lower()))
             except Exception as error:
@@ -223,7 +228,8 @@ def main():
         raise RuntimeError("Report requested before its scheduled cutoff")
     brands = load_all_brand_configs(enabled_only=True)
     read_only = lambda sid: SheetClient(sid, dry_run=True)
-    report = collect(brands, start, end, read_only, gmail_service, reply_window_start(args.slot, args.date or now.date(), tz))
+    report = collect(brands, start, end, read_only, gmail_service, end - timedelta(days=DAYS),
+                     reply_window_start(args.slot, args.date or now.date(), tz))
     if args.slot == "evening":
         report.plans, plan_warnings = collect_plans(brands, read_only, tz, now)
         report.warnings.extend(plan_warnings)

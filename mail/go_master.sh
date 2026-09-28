@@ -3,6 +3,7 @@
 #   bash go_master.sh prepare   build new images, create job email-sender-master (NO schedule), dry run (sends nothing)
 #   bash go_master.sh pause     pause the old sender's schedule
 #   bash go_master.sh switch    schedule email-sender-master + point both report jobs at the master sheet
+#   bash go_master.sh reports   deploy report changes only (10 AM / 6 PM emails); sender untouched, preview sends nothing
 #   bash go_master.sh stop      pause both senders
 #   bash go_master.sh rollback  old sender back on (only safe if the new one has not sent yet)
 set -euo pipefail
@@ -69,6 +70,19 @@ PY
     done
     gcloud scheduler jobs list --location $R --format='table(name.basename(),schedule,state)'
     echo "SWITCH DONE"
+    ;;
+  reports)
+    BASE=$(img email-sender-master)
+    REPO=${BASE%%@*}; REPO=${REPO%:*}; REPO=${REPO%/*}
+    REPORTS="$REPO/email-report:reports-$(date +%Y%m%d-%H%M)"
+    echo "previous=$(img email-report-evening)" | tee ~/reports_previous_image
+    gcloud builds submit --config cloudbuild.master-reports.yaml --substitutions=_BASE="$BASE",_REPORTS="$REPORTS" .
+    for j in email-report-morning email-report-evening; do
+      gcloud run jobs update $j --region $R --image "$REPORTS" --quiet
+    done
+    echo "== Preview (reads Gmail + sheet, sends nothing)"
+    gcloud run jobs execute email-report-evening --region $R --args=--slot=evening,--dry-run --wait
+    echo "REPORTS DONE ($REPORTS)"
     ;;
   stop)
     gcloud scheduler jobs pause $NEW_TRIGGER --location $R || true

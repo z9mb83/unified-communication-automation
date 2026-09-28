@@ -22,7 +22,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 ## Reports (10 AM / 6 PM)
 | Error / symptom | Fix | File |
 |---|---|---|
-| No report / `[PARTIAL]` subject | Read warnings in the email; redeploy if code error | `mail/daily_report.py`, `mail/report_core.py`, `mail/deploy_reports.sh` |
+| No report / `[PARTIAL]` subject | Read warnings in the email; redeploy with `bash go_master.sh reports` | `mail/daily_report.py`, `mail/report_core.py`, `mail/go_master.sh` |
+| Wrong columns / layout in report | Edit table code, then `bash go_master.sh reports` | `mail/report_core.py` (`render`, `REPLY_HEADERS`, `DAYS`) |
 | `Report requested before its scheduled cutoff` | Scheduler time ≠ report hour | `mail/report_core.py` (`MORNING_HOUR`, `EVENING_HOUR`) |
 | Replied / Replied At not filling | Sheet access (Editor) or no replies yet | `mail/reply_sheet.py` |
 

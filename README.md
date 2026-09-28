@@ -50,7 +50,7 @@ Menu **AUTOMATION**: Set up / repair tabs · Mail (import, status) · WhatsApp (
 - **Mail runs from this master sheet.** Cloud Run job `email-sender-master` (every 5 min, 10:00-17:55 Mon-Sat IST)
   reads the brand tabs, Limits and Mailboxes. The old job `email-sender` is paused; the old email sheet
   ([Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit)) is kept unchanged as a backup.
-- Reports: 10 AM replies table and 6 PM summary to info@99marketingservices.com, read from this sheet (`mail/REPORTS.md`).
+- Reports: 10 AM and 6 PM, each with the last 7 days of replies (brand, email, name, phone, dates) and sends by brand; 6 PM adds today + plan; to info@99marketingservices.com, read from this sheet (`mail/REPORTS.md`).
 - Emergency stop for all mail (Cloud Shell, from the unpacked `mail/` bundle): `bash go_master.sh stop`.
   Per brand: Limits tab, Mail row, On = No.
 - WhatsApp: needs the Meta details in **WhatsApp Setup** and a token (menu). Live sending is off until Settings says Yes.

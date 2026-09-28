@@ -1,4 +1,7 @@
-# Report image on top of the new sender image (same files, report entry point).
+# Report image on top of the master sender image. The report files are copied again so a
+# report-only change can be deployed (bash go_master.sh reports) without touching the sender.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
+COPY daily_report.py report_core.py reply_sheet.py test_daily_report.py ./
+RUN python -m unittest test_daily_report
 ENTRYPOINT ["python", "daily_report.py"]
