@@ -130,7 +130,73 @@ function waCheckRow_(row, ctx) {
   return { send: true, to: to };
 }
 
+/**
+ * Checks for "Send WhatsApp to selected rows": ignores the Send WhatsApp flag, hours, limits and gap,
+ * but still needs consent, a valid phone, not Do Not Contact, not already sent, and test mode rules.
+ */
+function waForceCheck_(row, ctx) {
+  var C = CC.COL, status = String(row[C.WA_STATUS - 1] || '').trim();
+  if (status === 'Sent' || status === WA.SENDING) return { send: false, reason: 'already sent' };
+  if (!ccYes_(row[C.WA_CONSENT - 1])) return { send: false, reason: 'WhatsApp consent is not Yes' };
+  var to;
+  try { to = waNormalizePhone_(row[C.PHONE - 1], ctx.cc); } catch (e) { return { send: false, reason: e.message }; }
+  var email = String(row[C.EMAIL - 1] || '').trim().toLowerCase();
+  if (ctx.dncPhones[to] || (email && ctx.dncEmails[email])) return { send: false, reason: 'in Do Not Contact' };
+  if (!ctx.live && !ctx.testNumbers[to]) return { send: false, reason: 'test mode - only the Settings test numbers get WhatsApp' };
+  return { send: true, to: to };
+}
+
 /* ============================== menu actions ============================== */
+
+function waSendSelected() {
+  var sh = ccSs_().getActiveSheet(), code = sh.getName();
+  if (!ccBrand_(code)) { ccAlert_('Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.'); return; }
+  var rows = mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
+  var max = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
+  if (!rows.length) { ccAlert_('Select one or more rows (row 3 and below).'); return; }
+  if (rows.length > max) { ccAlert_('Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').'); return; }
+  var lim = ccLimits_(code, 'WhatsApp');
+  if (lim && !lim.on) { ccAlert_('WhatsApp is OFF for ' + code + ' (Limits tab, WhatsApp row, On = No). Nothing sent.'); return; }
+  var setup = waSetup_(code), token = waToken_(code);
+  if (!setup || !setup.phoneId || !setup.waba || !setup.template) { ccAlert_(code + ': fill Phone Number ID, WABA ID and Template name in the WhatsApp Setup tab first.'); return; }
+  if (!token) { ccAlert_(code + ': no access token saved (AUTOMATION > WhatsApp > Save access token).'); return; }
+
+  var ctx = waContext_(), ready = [], skipped = [];
+  rows.forEach(function (n) {
+    var row = sh.getRange(n, 1, 1, 20).getDisplayValues()[0], check = waForceCheck_(row, ctx);
+    if (check.send) ready.push({ row: n, data: row, to: check.to }); else skipped.push('Row ' + n + ': ' + check.reason);
+  });
+  var skipText = skipped.length ? '\n\nSkipped:\n' + skipped.slice(0, 10).join('\n') + (skipped.length > 10 ? '\n...' : '') : '';
+  if (!ready.length) { ccAlert_('Nothing to send.' + skipText); return; }
+  if (!ccConfirm_('Send WhatsApp template "' + setup.template + '" NOW to ' + ready.length + ' row(s) in ' + code + '?\n\n' +
+      ready.slice(0, 8).map(function (r) { return 'Row ' + r.row + ': ' + (r.data[0] || '') + ' +' + r.to; }).join('\n') +
+      (ready.length > 8 ? '\n...' : '') + '\n\nSending hours, the gap and the daily/hourly limits are ignored.' + skipText)) return;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) { ccAlert_('Another WhatsApp run is in progress. Try again in a minute.'); return; }
+  var sent = 0, failed = [];
+  try {
+    var parsed;
+    try { parsed = waFetchTemplate_(setup, token); } catch (e) { ccAlert_(code + ': template problem - ' + e.message); return; }
+    if (parsed.status !== 'APPROVED') { ccAlert_(code + ': template status is ' + parsed.status + '. Nothing sent.'); return; }
+    if (!parsed.supported) { ccAlert_(code + ': template not supported - ' + parsed.reason); return; }
+    var logSheet = ccSheet_('WhatsApp Log'), logs = [];
+    for (var i = 0; i < ready.length; i++) {
+      var r = ready[i], components;
+      try {
+        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }));
+      } catch (e) {
+        sh.getRange(r.row, CC.COL.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]);
+        failed.push('Row ' + r.row + ': ' + e.message); continue;
+      }
+      var res = waSendOne_(sh, r.row, code, r.to, setup, token, components, logSheet, logs);
+      if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) break; }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText);
+}
 
 function waSaveToken() {
   var ui = SpreadsheetApp.getUi();
@@ -230,21 +296,51 @@ function waAutoOff_(silent) {
 
 /* ============================== the sender ============================== */
 
+/** Test mode, test numbers and Do Not Contact lists, read once per run. */
+function waContext_() {
+  var ctx = { live: ccYes_(ccSetting_('WhatsApp live sending')), cc: ccSetting_('Default country code') || '91',
+    testNumbers: {}, dncPhones: {}, dncEmails: {} };
+  ccSetting_('WhatsApp test numbers').split(',').forEach(function (n) {
+    try { ctx.testNumbers[waNormalizePhone_(n, ctx.cc)] = true; } catch (e) { /* ignore blanks */ }
+  });
+  mlReadDisplay_(ccSheet_('Do Not Contact'), 2, 1, 5).forEach(function (r) {
+    if (String(r[0]).trim()) ctx.dncEmails[String(r[0]).trim().toLowerCase()] = true;
+    try { if (String(r[4]).trim()) ctx.dncPhones[waNormalizePhone_(r[4], ctx.cc)] = true; } catch (e) { /* ignore */ }
+  });
+  return ctx;
+}
+
+/** Sends one template message and writes status + log. Returns {ok, stop}. */
+function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, logs) {
+  var C = CC.COL;
+  sh.getRange(rowNo, C.WA_STATUS).setValue(WA.SENDING);
+  SpreadsheetApp.flush();
+  var res = waGraph_(setup.phoneId + '/messages', token, 'post', {
+    messaging_product: 'whatsapp', recipient_type: 'individual', to: to, type: 'template',
+    template: { name: setup.template, language: { code: setup.language }, components: components }
+  });
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  var masked = to.slice(0, 4) + '****' + to.slice(-3);
+  if (res.code === 200 && res.body.messages && res.body.messages.length) {
+    var id = res.body.messages[0].id;
+    sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Sent', stamp, id]]);
+    var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id];
+    logSheet.appendRow(entry); logs.push(entry);
+    return { ok: true, stop: false };
+  }
+  var cls = waClassifyError_(res.code, res.body);
+  sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[cls.status, stamp, cls.message]]);
+  logSheet.appendRow([stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message]);
+  return { ok: false, stop: cls.message.indexOf('Access token') === 0 || cls.status === 'Retry', message: cls.message };
+}
+
 function waRun_() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) return ['Another WhatsApp run is in progress.'];
   var out = [];
   try {
     var C = CC.COL;
-    var ctx = { live: ccYes_(ccSetting_('WhatsApp live sending')), cc: ccSetting_('Default country code') || '91',
-      testNumbers: {}, dncPhones: {}, dncEmails: {} };
-    ccSetting_('WhatsApp test numbers').split(',').forEach(function (n) {
-      try { ctx.testNumbers[waNormalizePhone_(n, ctx.cc)] = true; } catch (e) { /* ignore blanks */ }
-    });
-    mlReadDisplay_(ccSheet_('Do Not Contact'), 2, 1, 5).forEach(function (r) {
-      if (String(r[0]).trim()) ctx.dncEmails[String(r[0]).trim().toLowerCase()] = true;
-      try { if (String(r[4]).trim()) ctx.dncPhones[waNormalizePhone_(r[4], ctx.cc)] = true; } catch (e) { /* ignore */ }
-    });
+    var ctx = waContext_();
     var logSheet = ccSheet_('WhatsApp Log');
     var logs = mlReadDisplay_(logSheet, 2, 1, 7);
     var budget = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
@@ -282,27 +378,9 @@ function waRun_() {
         } catch (e) {
           sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]); marked++; continue;
         }
-        sh.getRange(rowNo, C.WA_STATUS).setValue(WA.SENDING);
-        SpreadsheetApp.flush();
-        var res = waGraph_(setup.phoneId + '/messages', token, 'post', {
-          messaging_product: 'whatsapp', recipient_type: 'individual', to: check.to, type: 'template',
-          template: { name: setup.template, language: { code: setup.language }, components: components }
-        });
-        var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
-        var masked = check.to.slice(0, 4) + '****' + check.to.slice(-3);
-        if (res.code === 200 && res.body.messages && res.body.messages.length) {
-          var id = res.body.messages[0].id;
-          sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Sent', stamp, id]]);
-          var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id];
-          logSheet.appendRow(entry); logs.push(entry);
-          sent++; allow.allowed--; budget--;
-        } else {
-          var cls = waClassifyError_(res.code, res.body);
-          sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[cls.status, stamp, cls.message]]);
-          logSheet.appendRow([stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message]);
-          budget--;
-          if (cls.message.indexOf('Access token') === 0 || cls.status === 'Retry') break;
-        }
+        var r = waSendOne_(sh, rowNo, code, check.to, setup, token, components, logSheet, logs);
+        budget--;
+        if (r.ok) { sent++; allow.allowed--; } else if (r.stop) break;
       }
       out.push(code + ': ' + sent + ' sent' + (marked ? ', ' + marked + ' row(s) updated' : '') +
         (ctx.live ? '' : ' (test mode: only test numbers)'));

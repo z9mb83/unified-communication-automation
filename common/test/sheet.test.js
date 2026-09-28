@@ -216,3 +216,87 @@ test('WhatsApp run: test mode, limits, sending and logging', () => {
   g.waAutoOff();
   assert.strictEqual(globals.__triggers.length, 0);
 });
+
+test('send mail to selected rows: checks, queue and job start', () => {
+  const master = freshMaster();
+  const calls = [];
+  const fetch = (url, opts) => { calls.push({ url, opts }); return { getResponseCode: () => 200, getContentText: () => '{}' }; };
+  const globals = makeGlobals({ active: master, fetch });
+  const g = load(globals);
+  g.ccSetup();
+  assert.deepStrictEqual(Array.from(g.mlSelectedRows_([{ row: 1, count: 5 }, { row: 4, count: 2 }, { row: 9, count: 1 }])), [3, 4, 5, 9]);
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 5, 12).setValues([
+    ['Ready', 'ok@x.com', '', 'Hi', 'Body', 'Generated', '', '', '', '', '', ''],
+    ['No draft', 'new@x.com', '', '', '', '', '', '', '', '', '', ''],
+    ['Done', 'done@x.com', '', 'Hi', 'Body', 'Sent', '', '', '', 'Yes', 'id', ''],
+    ['Blocked', 'stop@x.com', '', 'Hi', 'Body', 'Generated', '', '', '', '', '', ''],
+    ['No email', '', '', '', '', '', '', '', '', '', '', '']]);
+  master.getSheetByName('Do Not Contact').getRange(2, 1).setValue('stop@x.com');
+  master.setActiveSheet(sb);
+  sb.setSelection([[3, 5]]);
+  g.mlSendSelected();
+  const q = master.getSheetByName('Mail Send Now');
+  assert.ok(q && q.hidden, 'queue tab exists and is hidden');
+  const lines = q.getRange(2, 1, q.getLastRow() - 1, 8).getValues();
+  assert.deepStrictEqual(lines.map(r => [r[1], r[2], r[3], r[4], r[5]]), [
+    ['SB', '3', 'ok@x.com', 'me@x.com', 'Pending'], ['SB', '4', 'new@x.com', 'me@x.com', 'Pending']]);
+  assert.strictEqual(calls.length, 1);
+  assert.ok(calls[0].url.endsWith('/projects/zoho-mail-automation-502409/locations/us-central1/jobs/email-sender-master:run'));
+  assert.strictEqual(calls[0].opts.headers.Authorization, 'Bearer oauth-token');
+  const msg = globals.__logs.join('\n');
+  assert.ok(msg.includes('Row 5: already emailed') && msg.includes('Row 6: in Do Not Contact') && msg.includes('Row 7: no valid email'), msg);
+  // selecting again does not queue twice; lead data untouched
+  g.mlSendSelected();
+  assert.strictEqual(q.getLastRow(), 3);
+  assert.strictEqual(sb.getRange(3, 6).getValue(), 'Generated');
+  // mail switched off in Limits: nothing queued
+  master.getSheetByName('Limits').getRange(2, 3).setValue('No');
+  sb.getRange(8, 1, 1, 2).setValues([['Late', 'late@x.com']]);
+  sb.setSelection([[8, 1]]);
+  g.mlSendSelected();
+  assert.strictEqual(q.getLastRow(), 3);
+  // non-brand tab
+  master.setActiveSheet(master.getSheetByName('Limits'));
+  g.mlSendSelected();
+  assert.ok(globals.__logs.pop().includes('Open a brand tab'));
+});
+
+test('send WhatsApp to selected rows ignores flag/limits but keeps consent, DNC and test mode', () => {
+  const master = freshMaster();
+  const calls = [];
+  const fetch = (url, opts) => {
+    calls.push({ url, opts });
+    const reply = url.includes('message_templates')
+      ? { data: [{ name: 'intro', language: 'en', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}' }] }] }
+      : { messages: [{ id: 'wamid.' + calls.length }] };
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+  };
+  const globals = makeGlobals({ active: master, fetch });
+  const g = load(globals);
+  g.ccSetup();
+  globals.__props.WA_TOKEN_ALL = 'x'.repeat(40);
+  master.getSheetByName('WhatsApp Setup').getRange(2, 1, 1, 6).setValues([['SB', '111', '222', 'intro', 'en', 'A']]);
+  master.getSheetByName('Limits').getRange(7, 3, 1, 6).setValues([['Yes', '1', '1', '600', '03:00', '03:01']]); // tight limits + closed hours
+  g.ccSetSetting_('WhatsApp live sending', 'Yes');
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 4, 20).setValues([
+    ['One', 'a@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811111111', '', 'Yes', '', '', ''],
+    ['Two', 'b@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9822222222', 'No', 'Yes', '', '', ''],
+    ['No consent', 'c@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9833333333', 'Yes', '', '', '', ''],
+    ['Already', 'd@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9844444444', 'Yes', 'Yes', 'Sent', '', '']]);
+  master.setActiveSheet(sb);
+  sb.setSelection([[3, 4]]);
+  g.waSendSelected();
+  assert.deepStrictEqual(sb.getRange(3, 18, 4, 1).getValues().map(r => r[0]), ['Sent', 'Sent', '', 'Sent']);
+  assert.strictEqual(calls.filter(c => c.url.endsWith('/messages')).length, 2);
+  const msg = globals.__logs.pop();
+  assert.ok(msg.includes('2 sent') && msg.includes('consent is not Yes') && msg.includes('already sent'), msg);
+  // test mode: only test numbers
+  g.ccSetSetting_('WhatsApp live sending', 'No');
+  sb.getRange(7, 1, 1, 20).setValues([['New', 'e@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9855555555', '', 'Yes', '', '', '']]);
+  sb.setSelection([[7, 1]]);
+  g.waSendSelected();
+  assert.strictEqual(sb.getRange(7, 18).getValue(), '');
+  assert.ok(globals.__logs.pop().includes('test mode'));
+});

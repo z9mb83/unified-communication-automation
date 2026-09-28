@@ -1,7 +1,8 @@
 # New sender image = the current live email-sender image + the master-sheet changes.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-COPY app/config_loader.py app/limit_manager.py app/brand_runner.py app/
+COPY app/config_loader.py app/limit_manager.py app/brand_runner.py app/send_now.py app/
+COPY main.py ./
 COPY brands_master/ brands_master/
-COPY daily_report.py report_core.py reply_sheet.py test_daily_report.py test_mail_limits.py ./
-RUN python -m unittest test_mail_limits test_daily_report
+COPY daily_report.py report_core.py reply_sheet.py test_daily_report.py test_mail_limits.py test_send_now.py ./
+RUN python -m unittest test_mail_limits test_daily_report test_send_now
