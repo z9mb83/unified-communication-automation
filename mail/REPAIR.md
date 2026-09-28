@@ -1,7 +1,7 @@
 # Mail — repair and switch-over
 
-The mail tool is the Cloud Run job **email-sender** (project `zoho-mail-automation-502409`, region `us-central1`),
-built from this folder. It runs every 5 minutes (10:00-17:55 Mon-Sat). Reports: `REPORTS.md`.
+The mail tool is the Cloud Run job **email-sender-master** (project `zoho-mail-automation-502409`, region `us-central1`),
+built from this folder (image = previous sender + `Dockerfile.master`). The old `email-sender` job is paused. It runs every 5 minutes (10:00-17:55 Mon-Sat). Reports: `REPORTS.md`.
 
 | Piece | Where |
 |---|---|
@@ -33,7 +33,11 @@ gcloud secrets versions add gmail-oauth-bundle --data-file=gmail_tokens_bundle.j
 ```
 Then delete `gmail_tokens_bundle.json` (it holds login tokens; never commit it).
 
-## Moving mail to the master sheet (one time)
+## Moving mail to the master sheet (done 28 Sep 2026 with `go_master.sh prepare|pause|switch`)
+If the schedule ever reports Failed with a permission error:
+`gcloud run jobs add-iam-policy-binding email-sender-master --region us-central1 --member=serviceAccount:84564469121-compute@developer.gserviceaccount.com --role=roles/run.invoker`
+
+Original plan:
 1. `bash deploy_master.sh` — builds a new image, creates **email-sender-master** with no schedule and runs a
    dry run against the master sheet (reads only). The live sender is untouched.
    Share the master sheet with `email-sender-runner@zoho-mail-automation-502409.iam.gserviceaccount.com` (Editor) first.
