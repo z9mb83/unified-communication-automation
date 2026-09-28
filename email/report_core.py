@@ -28,6 +28,7 @@ class Report:
     automated: list[dict] = field(default_factory=list)
     pending: list[Activity] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    all_replies: list[dict] = field(default_factory=list)  # every reply found, any date
 
 
 def window(slot, run_date, tz):

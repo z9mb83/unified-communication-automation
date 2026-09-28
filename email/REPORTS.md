@@ -9,7 +9,11 @@ Timezone: Asia/Kolkata
 - 18:00 every day: current day, midnight through 18:00.
 - All enabled brands: sends, failed send attempts, inbound replies, automated responses,
   and existing outreach awaiting reply for manual follow-up review.
-- No lead follow-up messages are automatically sent. Lead sheets are read-only.
+- No lead follow-up messages are automatically sent.
+- Reply tracking: after each report is sent, leads that replied are marked in their brand's
+  lead tab: column M "Replied" = Yes and column N "Replied At". Only M:N are written (headers
+  in row 2 are added if missing); A:L are never changed. Once marked, a row stays marked.
+  Dry-run only prints how many replied leads were found.
 - Replies are matched from metadata in original Gmail conversations, including older
   outreach. New/unrelated threads and replies delivered only to external CC mailboxes
   are not covered. Reply bodies are not read with the existing gmail.metadata scope.
@@ -38,6 +42,19 @@ the sender's Sent folder for its deterministic Message-ID before any manual reco
 Do not delete such a receipt and blindly resend. If a report execution is delayed
 past midnight, it uses the new execution date; review failed/missed executions in
 Cloud Run. Scheduling triggers at 09:00/18:00; collection and delivery take time.
+
+Deploying the reply-tracking change (rebuild the report image, then point both report jobs
+at it; the email-sender job is not touched):
+
+    cd email
+    docker build -f Dockerfile.reports --build-arg BASE_IMAGE=<current email-sender image digest> -t <report image> .
+    docker push <report image>
+    gcloud run jobs update <morning report job> --image <report image> --region <region>
+    gcloud run jobs update <evening report job> --image <report image> --region <region>
+
+The report jobs' service account already writes nothing else; it needs edit access to the
+email workbook (it reads it today) for M:N to be written. If it only has view access, the
+report still sends and logs "could not write reply status".
 
 Unit tests (no network, no sends):
 

@@ -27,7 +27,8 @@ Brand codes: **SB** Shaadi Bells · **99M** 99 Marketing · **99S** 99 Staffing 
    brand's Gmail mailboxes within each mailbox's daily limit.
 3. Results are written back to the sheet (Send Status, Send Log). Unsubscribes go to the
    Suppression tab and are never emailed again.
-4. Two report jobs email a daily summary at 09:00 and 18:00 IST (see `email/REPORTS.md`).
+4. Two report jobs email a daily summary at 09:00 and 18:00 IST (see `email/REPORTS.md`), and
+   mark leads who replied in each lead tab: column **M Replied = Yes**, column **N Replied At**.
 
 WhatsApp is sent directly from the master sheet's Apps Script. It does not use `email/`. The
 WhatsApp token is saved through the menu into Script Properties, never in a cell or in GitHub.
@@ -54,6 +55,7 @@ email/                          THE EMAIL TOOL (deployed to Cloud Run as email-s
   brands/<brand>/config.json    Per-brand settings: sheet tab, mailboxes, limits, tone
   daily_maintenance.py          Daily cleanup job
   daily_report.py, report_core.py   09:00 / 18:00 summary email
+  reply_sheet.py                Writes Replied / Replied At (columns M:N) into the lead tabs
   test_daily_report.py          Tests for the report (run during the report image build)
   Dockerfile                    Builds the email-sender image
   Dockerfile.reports            Builds the report image on top of it
