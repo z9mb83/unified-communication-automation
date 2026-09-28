@@ -57,6 +57,9 @@ Menu **AUTOMATION**: Set up / repair tabs · Mail (import, status) · WhatsApp (
 - One-off tools (Cloud Shell): `mail/tools/send_one.sh <to> <name>` (single 99 Marketing email) and
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
+## Something broke?
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md): each error, its fix and the file to repair.
+
 ## Safety
 Never commit tokens, `credentials.json`, `.env` or API keys (`.gitignore` blocks the usual names).
 The WhatsApp token is stored with the menu in the script's private settings, never in a cell.
