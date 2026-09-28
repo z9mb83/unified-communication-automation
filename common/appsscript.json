@@ -13,6 +13,8 @@
   ],
   "urlFetchWhitelist": [
     "https://graph.facebook.com/",
-    "https://run.googleapis.com/"
+    "https://run.googleapis.com/",
+    "https://*.googleusercontent.com/",
+    "https://*.website-files.com/"
   ]
 }
