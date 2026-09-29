@@ -20,6 +20,7 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | `Outside sending hours` | **Limits** → Start / End | `mail/app/brand_runner.py` |
 | `Missing required Sheet tab(s)` | Menu **Set up / repair tabs** | `common/Core.gs` |
 | Drafts not written / `OpenAI generation error` (401, 429, missing key) | Replace / top up the key | `mail/OPENAI_KEY.md`, `mail/app/email_generator.py` |
+| Queued drafts still in the old format (Website line, same wording) | Cloud Shell: `bash go_master.sh regen-preview`, then `bash go_master.sh regen` (only D:E change; backup tab "Old drafts (backup)") | `mail/app/regenerate.py` |
 | `Draft kept spam-risk wording` | Rare; retried next run. Edit word list if it repeats | `mail/app/email_generator.py` (`SPAM_PHRASES`) |
 | `Recipient suppressed` / `already contacted` | Expected; see **Do Not Contact** / Mail Log | `mail/app/suppression_manager.py`, `mail/app/duplicate_manager.py` |
 | Sheets `403` | Share sheet (Editor) with `email-sender-runner@…` | — |

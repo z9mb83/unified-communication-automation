@@ -5,6 +5,8 @@
 #   bash go_master.sh switch    schedule email-sender-master + point both report jobs at the master sheet
 #   bash go_master.sh sender    deploy sender code changes to email-sender-master (+ reports), then a dry run that sends nothing
 #   bash go_master.sh reports   deploy report changes only (10 AM / 6 PM emails); sender untouched, preview sends nothing
+#   bash go_master.sh regen-preview   show how many queued drafts would be rewritten + one sample (changes nothing)
+#   bash go_master.sh regen     rewrite queued, unsent drafts that are still in the old format (sends nothing)
 #   bash go_master.sh stop      pause both senders
 #   bash go_master.sh rollback  old sender back on (only safe if the new one has not sent yet)
 set -euo pipefail
@@ -71,6 +73,14 @@ PY
     done
     gcloud scheduler jobs list --location $R --format='table(name.basename(),schedule,state)'
     echo "SWITCH DONE"
+    ;;
+  regen-preview|regen)
+    ARGS="--regenerate-drafts"; [ "$1" = regen-preview ] && ARGS="$ARGS,--dry-run"
+    [ -n "${2:-}" ] && ARGS="$ARGS,--brand,$2"
+    EXEC=$(gcloud run jobs execute email-sender-master --region $R --args="$ARGS" --wait --format='value(metadata.name)')
+    echo "execution: $EXEC - reading its output..."; sleep 20
+    gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
+      --order=asc --freshness=2h --format='value(textPayload)' | grep -v '^$'
     ;;
   sender)
     BASE=$(img email-sender)

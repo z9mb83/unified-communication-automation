@@ -84,7 +84,13 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--read-sheets", action="store_true", help="In dry-run mode, read live Sheets data read-only.")
     parser.add_argument("--generate-only", action="store_true", help="Generate drafts for one brand without any Gmail send request.")
+    parser.add_argument("--regenerate-drafts", action="store_true",
+                        help="Rewrite queued (unsent) drafts that are still in the old format; sends nothing (app/regenerate.py).")
+    parser.add_argument("--limit", type=int, default=250, help="With --regenerate-drafts: max drafts per run.")
     args = parser.parse_args()
+    if args.regenerate_drafts:
+        _regenerate(args)
+        return
     if args.generate_only and args.dry_run:
         parser.error("--generate-only writes drafts, so it cannot be combined with --dry-run")
     if args.generate_only and not args.brand:
@@ -110,6 +116,24 @@ def main() -> None:
             print(f"  dry-run: {note}")
         for error in result.errors:
             print(f"  error: {error}")
+
+
+def _regenerate(args) -> None:
+    from app.regenerate import regenerate
+    from app.sheet_client import SheetClient
+    from app.utilities import timezone_for
+
+    runtime = load_runtime_config()
+    brands = [b for b in load_all_brand_configs(enabled_only=True) if not args.brand or b.brand_id == args.brand]
+    tz = timezone_for(runtime.timezone)
+    # Hold the sender's run lock so no email is sent with a half-rewritten draft meanwhile.
+    with _run_lock() as acquired:
+        if not acquired:
+            print("The sender is running right now - try again in a minute.")
+            return
+        print("== Regenerate drafts" + (" (PREVIEW: nothing is changed or sent)" if args.dry_run else " (sends nothing)"))
+        for line in regenerate(runtime, brands, lambda sid: SheetClient(sid), args.dry_run, args.limit, tz):
+            print(line)
 
 
 if __name__ == "__main__":
