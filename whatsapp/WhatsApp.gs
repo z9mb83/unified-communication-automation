@@ -475,7 +475,8 @@ function waRun_() {
 var WAH = {
   HOOK_PROP: 'WA_HOOK_KEY', VERIFY_PROP: 'WA_VERIFY_TOKEN', FORWARD_PROP: 'WA_FORWARD_URL',
   STOP_WORDS: ['stop', 'unsubscribe', 'stop all', 'opt out', 'optout', 'remove me', 'stop messages'],
-  RANK: { delivered: 1, read: 2 }
+  RANK: { delivered: 1, read: 2 },
+  WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbwJXy-XZJsxRQXFFrtJXCgCY0JEyaKOC3Dz6kYqGcwxy5kvONm3HZ46gXNvNlz1oU6EwA/exec'
 };
 
 /** Text shown for a customer message of any type. */
@@ -658,8 +659,9 @@ function waSetupWebhook() {
   if (!p.getProperty(WAH.VERIFY_PROP)) p.setProperty(WAH.VERIFY_PROP, Utilities.getUuid().replace(/-/g, ''));
   p.setProperty('SHEET_ID', ccSs_().getId());
   ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
-  var url = '';
-  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+  // The live web app URL (Deploy > Manage deployments). ScriptApp.getService().getUrl() can return the
+  // test (/dev-style) deployment when run from the menu, which Meta cannot reach - so the real one is stored.
+  var url = p.getProperty('WEBAPP_URL') || WAH.WEBAPP_URL;
   if (!url) { ccAlert_('Deploy the web app first: Extensions > Apps Script > Deploy > New deployment > Web app (Execute as: Me, Access: Anyone).'); return; }
   var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
   var html = HtmlService.createHtmlOutput(
