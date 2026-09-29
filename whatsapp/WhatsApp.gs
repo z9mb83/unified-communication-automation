@@ -59,14 +59,20 @@ function waParseTemplate_(t) {
   return out;
 }
 
-/** headerUrl: public https link to the header image/video/document (WhatsApp Setup, column L). */
-function waBuildComponents_(parsed, vars, headerUrl) {
+/**
+ * header: {id: <Meta media id>} (what the senders use - see waHeaderRef_) or a public https link.
+ * Meta cannot download some links (e.g. Google Sites images), so the senders upload the file and send its id.
+ */
+function waBuildComponents_(parsed, vars, header) {
   var params = [], out = [];
   if (parsed.header) {
-    var url = String(headerUrl || '').trim();
-    if (!/^https:\/\/\S+$/.test(url)) throw new Error('Template has a ' + parsed.header + ' header: put a public https link in WhatsApp Setup > Header media URL');
     var media = { type: parsed.header };
-    media[parsed.header] = { link: url };
+    if (header && header.id) media[parsed.header] = { id: String(header.id) };
+    else {
+      var url = String(header || '').trim();
+      if (!/^https:\/\/\S+$/.test(url)) throw new Error('Template has a ' + parsed.header + ' header: put a public https link in WhatsApp Setup > Header media URL');
+      media[parsed.header] = { link: url };
+    }
     out.push({ type: 'header', parameters: [media] });
   }
   for (var i = 0; i < parsed.count; i++) {
@@ -190,11 +196,15 @@ function waSendSelected() {
     try { parsed = waFetchTemplate_(setup, token); } catch (e) { ccAlert_(code + ': template problem - ' + e.message); return; }
     if (parsed.status !== 'APPROVED') { ccAlert_(code + ': template status is ' + parsed.status + '. Nothing sent.'); return; }
     if (!parsed.supported) { ccAlert_(code + ': template not supported - ' + parsed.reason); return; }
+    var header = null;
+    if (parsed.header) {
+      try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { ccAlert_(code + ': ' + e.message + '. Nothing sent.'); return; }
+    }
     var logSheet = ccSheet_('WhatsApp Log'), logs = [];
     for (var i = 0; i < ready.length; i++) {
       var r = ready[i], components;
       try {
-        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }), setup.headerUrl);
+        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }), header);
       } catch (e) {
         sh.getRange(r.row, CC.COL.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]);
         failed.push('Row ' + r.row + ': ' + e.message); continue;
@@ -255,6 +265,53 @@ function waFetchTemplate_(setup, token) {
   var t = list.filter(function (x) { return x.language === setup.language; })[0];
   if (!t) throw new Error('Template exists but not in language "' + setup.language + '" (has: ' + list.map(function (x) { return x.language; }).join(', ') + ')');
   return waParseTemplate_(t);
+}
+
+var WA_MEDIA_MAX_AGE_DAYS = 20; // Meta keeps uploaded media for 30 days
+
+function waHash_(s) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+  return h.toString(16);
+}
+
+/** Google Drive share links (file/d/ID/view, open?id=ID) -> direct download link; other links unchanged. */
+function waDirectLink_(url) {
+  var m = /^https:\/\/(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([\w-]{20,})/.exec(String(url || '').trim());
+  return m ? 'https://drive.google.com/uc?export=download&id=' + m[1] : String(url || '').trim();
+}
+
+/**
+ * Header media for a brand as {id}: downloads the Header media URL once, uploads it to Meta and
+ * caches the media id (Script Properties) for 20 days. Throws a readable error on any problem.
+ */
+function waHeaderRef_(setup, token, type) {
+  var url = String(setup.headerUrl || '').trim();
+  if (!/^https:\/\/\S+$/.test(url)) throw new Error('Template has a ' + type + ' header: put a public https link in WhatsApp Setup > Header media URL');
+  var props = PropertiesService.getScriptProperties(), key = 'WA_MEDIA_' + waHash_(setup.phoneId + '|' + url);
+  try {
+    var cached = JSON.parse(props.getProperty(key) || 'null');
+    if (cached && cached.id && Date.now() - cached.at < WA_MEDIA_MAX_AGE_DAYS * 86400000) return { id: cached.id };
+  } catch (e) { /* re-upload */ }
+  var file;
+  try { file = UrlFetchApp.fetch(waDirectLink_(url), { muteHttpExceptions: true, followRedirects: true }); }
+  catch (e) { throw new Error('Could not download the header ' + type + ' (' + String(e.message || e).slice(0, 120) + ')'); }
+  if (file.getResponseCode() !== 200) throw new Error('Could not download the header ' + type + ' (HTTP ' + file.getResponseCode() + ')');
+  var blob = file.getBlob(), mime = String(blob.getContentType() || '').split(';')[0];
+  if (type === 'image' && ['image/jpeg', 'image/png'].indexOf(mime) === -1) {
+    throw new Error('Header link is not a JPG/PNG image (' + (mime || 'unknown type') + ')' +
+      (mime === 'text/html' ? ' - for Google Drive, share the file as "Anyone with the link"' : ''));
+  }
+  if (blob.getBytes().length > 5 * 1024 * 1024) throw new Error('Header ' + type + ' is larger than 5 MB');
+  var up = UrlFetchApp.fetch('https://graph.facebook.com/' + (ccSetting_('Graph API version') || 'v26.0') + '/' + setup.phoneId + '/media', {
+    method: 'post', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token },
+    payload: { messaging_product: 'whatsapp', type: mime, file: blob }
+  });
+  var body = {};
+  try { body = JSON.parse(up.getContentText() || '{}'); } catch (e) { body = {}; }
+  if (up.getResponseCode() !== 200 || !body.id) throw new Error('Meta did not accept the header ' + type + ': ' + waClassifyError_(up.getResponseCode(), body).message);
+  props.setProperty(key, JSON.stringify({ id: body.id, at: Date.now() }));
+  return { id: body.id };
 }
 
 function waCheckTemplates() {
@@ -369,7 +426,7 @@ function waRun_() {
       if (!setup || !setup.phoneId || !setup.waba || !setup.template) { out.push(code + ': WhatsApp Setup incomplete'); return; }
       if (!token) { out.push(code + ': no access token saved'); return; }
 
-      var sh = ccSheet_(code), rows = mlReadDisplay_(sh, 3, 1, 20), parsed = null, sent = 0, marked = 0;
+      var sh = ccSheet_(code), rows = mlReadDisplay_(sh, 3, 1, 20), parsed = null, header = null, sent = 0, marked = 0;
       for (var i = 0; i < rows.length && allow.allowed > 0 && budget > 0; i++) {
         var check = waCheckRow_(rows[i], ctx), rowNo = i + 3;
         if (!check.send) {
@@ -380,10 +437,13 @@ function waRun_() {
           try { parsed = waFetchTemplate_(setup, token); } catch (e) { out.push(code + ': template problem - ' + e.message); return; }
           if (parsed.status !== 'APPROVED') { out.push(code + ': template status is ' + parsed.status); return; }
           if (!parsed.supported) { out.push(code + ': template not supported - ' + parsed.reason); return; }
+          if (parsed.header) {
+            try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { out.push(code + ': ' + e.message); return; }
+          }
         }
         var components;
         try {
-          components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? rows[i][c - 1] : ''; }), setup.headerUrl);
+          components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? rows[i][c - 1] : ''; }), header);
         } catch (e) {
           sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]); marked++; continue;
         }

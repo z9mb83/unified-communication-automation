@@ -308,6 +308,45 @@ test('send WhatsApp to selected rows ignores flag/limits but keeps consent, DNC 
   assert.ok(globals.__logs.pop().includes('test mode'));
 });
 
+test('image header: downloaded once, uploaded to Meta, sent by media id', () => {
+  const master = freshMaster();
+  const calls = [];
+  const fetch = (url, opts) => {
+    calls.push({ url, opts: opts || {} });
+    if (url.startsWith('https://img.example')) return { getResponseCode: () => 200,
+      getBlob: () => ({ getContentType: () => 'image/jpeg', getBytes: () => [1, 2, 3] }) };
+    const reply = url.includes('message_templates')
+      ? { data: [{ name: 'marketing', language: 'en', status: 'APPROVED', components: [{ type: 'HEADER', format: 'IMAGE' }, { type: 'BODY', text: 'Hello' }] }] }
+      : url.endsWith('/media') ? { id: 'MEDIA123' } : { messages: [{ id: 'wamid.' + calls.length }] };
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+  };
+  const globals = makeGlobals({ active: master, fetch });
+  const g = load(globals);
+  g.ccSetup();
+  globals.__props.WA_TOKEN_ALL = 'x'.repeat(40);
+  const setup = master.getSheetByName('WhatsApp Setup');
+  setup.getRange(3, 1, 1, 6).setValues([['99M', '111', '222', 'marketing', 'en', 'A']]);
+  setup.getRange(3, 12).setValue('https://img.example/logo.jpg');
+  g.ccSetSetting_('WhatsApp live sending', 'Yes');
+  master.getSheetByName('Limits').getRange(8, 3, 1, 6).setValues([['Yes', '', '', '0', '', '']]);
+  const t = master.getSheetByName('99M');
+  t.getRange(3, 1, 2, 20).setValues([
+    ['A', 'a@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811111111', 'Yes', 'Yes', '', '', ''],
+    ['B', 'b@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9822222222', 'Yes', 'Yes', '', '', '']]);
+  g.waRun_();
+  const sends = calls.filter(c => c.url.endsWith('/messages'));
+  assert.strictEqual(sends.length, 2);
+  assert.strictEqual(calls.filter(c => c.url.endsWith('/media')).length, 1);
+  assert.strictEqual(calls.filter(c => c.url.startsWith('https://img.example')).length, 1);
+  const body = JSON.parse(sends[0].opts.payload);
+  assert.deepStrictEqual(body.template.components[0], { type: 'header', parameters: [{ type: 'image', image: { id: 'MEDIA123' } }] });
+  // cached for later runs: no new upload
+  t.getRange(5, 1, 1, 20).setValues([['C', 'c@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9833333333', 'Yes', 'Yes', '', '', '']]);
+  g.waRun_();
+  assert.strictEqual(calls.filter(c => c.url.endsWith('/media')).length, 1);
+  assert.strictEqual(t.getRange(5, 18).getValue(), 'Sent');
+});
+
 test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   const master = freshMaster();
   const globals = makeGlobals({ active: master });
@@ -347,4 +386,14 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   globals.__props.DASH_KEY = 'k'.repeat(64);
   assert.ok(g.dbKeyOk_('k'.repeat(64)));
   assert.ok(!g.dbKeyOk_('k'.repeat(63) + 'x'));
+});
+
+test('Google Drive share links become direct downloads', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  const id = '1AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+  const want = 'https://drive.google.com/uc?export=download&id=' + id;
+  assert.strictEqual(g.waDirectLink_('https://drive.google.com/file/d/' + id + '/view?usp=sharing'), want);
+  assert.strictEqual(g.waDirectLink_('https://drive.google.com/open?id=' + id), want);
+  assert.strictEqual(g.waDirectLink_('https://drive.google.com/uc?export=view&id=' + id), want);
+  assert.strictEqual(g.waDirectLink_(' https://example.com/logo.png '), 'https://example.com/logo.png');
 });
