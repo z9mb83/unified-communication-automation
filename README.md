@@ -18,6 +18,7 @@ whatsapp/    WhatsApp: sends each brand's approved Meta template (runs inside th
   REPAIR.md
 sms/         Placeholder: no SMS provider chosen yet
 common/      Shared sheet script: menu, tab setup, dashboard, limits (Core.gs + appsscript.json)
+  Dashboard.gs      read-only JSON feed for the web dashboard (published as an Apps Script web app)
   test/             offline tests for the sheet scripts:  node --test common/test/sheet.test.js
 archive/     Old code kept for reference only (not used)
 ```
@@ -37,7 +38,7 @@ The complete code from before this layout is on the branch `v1-before-master-she
 | **Settings** | WhatsApp live switch + test numbers, and switch-over status |
 | Mail Control XX / Mail Log XX | Hidden technical tabs used by the mail tool (settings follow the Limits tab) |
 
-Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, import, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off).
+Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, import, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off) · Dashboard (create access key, show feed link).
 
 **Send to selected rows** (select rows in a brand tab, then the menu item): sends right away, ignoring sending hours,
 gap and brand limits. Still respected: Mail/WhatsApp On in Limits, Do Not Contact, already sent, mailbox daily limits (mail),
@@ -58,9 +59,33 @@ queued in the hidden tab "Mail Send Now" and the mail job is started at once (`m
 - Reports: 10 AM and 6 PM, each with the last 7 days of replies (brand, email, name, phone, dates) and sends by brand; 6 PM adds today + plan; to info@99marketingservices.com, read from this sheet (`mail/REPORTS.md`).
 - Emergency stop for all mail (Cloud Shell, from the unpacked `mail/` bundle): `bash go_master.sh stop`.
   Per brand: Limits tab, Mail row, On = No.
-- WhatsApp: needs the Meta details in **WhatsApp Setup** and a token (menu). Live sending is off until Settings says Yes.
+- WhatsApp: one number (+91 76588 74146, "99 Consulting Services") for all brands. Phone Number ID, WABA ID and the
+  approved templates (`marketing`, `staffing`, `property`, `skyline`; Shaadi Bells has none yet) are in **WhatsApp Setup**;
+  the token is saved (menu). Templates have a logo image: put a Google Drive link (shared "Anyone with the link") or any
+  direct image link in column L - the sheet uploads it to Meta itself. Test mode is controlled by **Settings**.
 - One-off tools (Cloud Shell): `mail/tools/send_one.sh <to> <name>` (single 99 Marketing email) and
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
+
+## Live dashboard (Vercel)
+**https://automation-dashboard-sigma-rose.vercel.app** - password protected; charts of emails, replies, WhatsApp,
+lead pipeline and mailbox limits for all brands, refreshed every minute. Code: separate private repo
+[`automation-dashboard`](https://github.com/linkwithmarketing-design/automation-dashboard) (Next.js on Vercel, Hobby plan).
+
+```
+master sheet --(read-only)--> common/Dashboard.gs web app (JSON, needs access key)
+                                   |
+                                   v
+            automation-dashboard on Vercel: /api/data (server, holds the key) --> browser (charts)
+```
+- It only **reads** the sheet; a dashboard problem can never stop mail or WhatsApp.
+- Vercel settings (Project -> Settings -> Environment Variables): `SHEET_API_URL` (menu **Dashboard -> Show feed link**),
+  `SHEET_API_KEY` (menu **Dashboard -> Create access key**, 64 characters, shown once), `DASHBOARD_PASSWORD`.
+- After changing any Vercel setting: **Deployments -> latest -> ... -> Redeploy** (settings apply only to new deployments).
+- Code change to the dashboard: push to `main` of `automation-dashboard`; Vercel deploys automatically.
+- Code change to `common/Dashboard.gs`: paste it into the sheet script, then **Deploy -> Manage deployments -> edit ->
+  Version: New version** (the web app keeps serving the old version until you do).
+- Vercel's free Hobby plan is officially for non-commercial use; if Vercel asks, move to Pro or to Cloudflare Pages/Netlify
+  (same code).
 
 ## Something broke?
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md): each error, its fix and the file to repair.
