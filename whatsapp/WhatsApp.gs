@@ -676,52 +676,40 @@ function waSetupWebhook() {
 }
 
 /**
- * Menu: where does Meta send real WhatsApp messages? Checks the WhatsApp Business Account and the phone
- * number for an "override" webhook address (it wins over the app's webhook), and offers to point both at
- * this sheet. Tokens are never shown.
+ * Menu: where does Meta send real WhatsApp messages? Meta picks, in order: the phone number's own address,
+ * the business account's address (set per subscribed app), then the subscribed app's webhook. If that address
+ * is not this sheet, it offers to (1) keep the current receiver working by forwarding to it (WA_FORWARD_URL) and
+ * (2) set this sheet as the business account's address. Tokens are never shown.
  */
 function waCheckWebhook() {
   var p = PropertiesService.getScriptProperties(), key = p.getProperty(WAH.HOOK_PROP), verify = p.getProperty(WAH.VERIFY_PROP);
   if (!key || !verify) { ccAlert_('Run "Set up reply webhook" first.'); return; }
-  var ours = (p.getProperty('WEBAPP_URL') || WAH.WEBAPP_URL) + '?key=' + key;
-  var seen = {}, lines = [], fixes = [];
+  var ours = (p.getProperty('WEBAPP_URL') || WAH.WEBAPP_URL) + '?key=' + key, base = function (u) { return String(u || '').split('?')[0]; };
+  var seen = {}, lines = [], fixes = [], forward = '';
   CC.BRANDS.forEach(function (b) {
     var setup = waSetup_(b[0]), token = waToken_(b[0]);
-    if (!setup || !setup.phoneId || !token) return;
-    if (!seen['w' + setup.waba] && setup.waba) {
-      seen['w' + setup.waba] = true;
-      var subs = waGraph_(setup.waba + '/subscribed_apps', token, 'get');
-      if (subs.code !== 200) lines.push('Business account ' + setup.waba + ': could not read (' + subs.code + ' ' + ((subs.body.error && subs.body.error.message) || '') + ')');
-      else {
-        var apps = subs.body.data || [];
-        if (!apps.length) { lines.push('Business account ' + setup.waba + ': NO app subscribed - Meta sends messages nowhere.'); fixes.push({ path: setup.waba + '/subscribed_apps', payload: {} }); }
-        apps.forEach(function (a) {
-          var d = a.whatsapp_business_api_data || a, uri = a.override_callback_uri || '';
-          lines.push('Business account ' + setup.waba + ' -> app "' + (d.name || d.id || '?') + '"' +
-            (uri ? ' with its own address: ' + uri.split('?')[0] + (uri.split('?')[0] + '' === ours.split('?')[0] ? ' (this sheet)' : ' (NOT this sheet)') : ' (uses the app webhook)'));
-          if (uri && uri.split('?')[0] !== ours.split('?')[0]) fixes.push({ path: setup.waba + '/subscribed_apps', payload: { override_callback_uri: ours, verify_token: verify } });
-        });
-      }
-    }
-    if (!seen['p' + setup.phoneId]) {
-      seen['p' + setup.phoneId] = true;
-      var ph = waGraph_(setup.phoneId + '?fields=display_phone_number,webhook_configuration', token, 'get');
-      if (ph.code !== 200) { lines.push('Number ' + setup.phoneId + ': could not read (' + ph.code + ')'); return; }
-      var wc = ph.body.webhook_configuration || {}, pu = wc.phone_number || '';
-      lines.push('Number ' + (ph.body.display_phone_number || setup.phoneId) + ': ' +
-        (pu ? 'its own address ' + pu.split('?')[0] + (pu.split('?')[0] === ours.split('?')[0] ? ' (this sheet)' : ' (NOT this sheet)') : 'no own address') +
-        (wc.whatsapp_business_account ? '; business account address ' + String(wc.whatsapp_business_account).split('?')[0] : '') +
-        (wc.application ? '; app address ' + String(wc.application).split('?')[0] : ''));
-      if (pu && pu.split('?')[0] !== ours.split('?')[0]) fixes.push({ path: setup.phoneId, payload: { webhook_configuration: { override_callback_uri: ours, verify_token: verify } } });
-    }
+    if (!setup || !setup.phoneId || !token || seen[setup.phoneId]) return;
+    seen[setup.phoneId] = true;
+    var ph = waGraph_(setup.phoneId + '?fields=display_phone_number,webhook_configuration', token, 'get');
+    if (ph.code !== 200) { lines.push('Number ' + setup.phoneId + ': could not read (' + ph.code + ')'); return; }
+    var wc = ph.body.webhook_configuration || {};
+    var active = wc.phone_number || wc.whatsapp_business_account || wc.application || '';
+    var where = wc.phone_number ? 'number address' : wc.whatsapp_business_account ? 'business account address' : 'app webhook';
+    lines.push('Number ' + (ph.body.display_phone_number || setup.phoneId) + ': messages go to the ' + where + ' ' + base(active) +
+      (base(active) === base(ours) ? '  = THIS SHEET' : '  (not this sheet)'));
+    if (!active || base(active) === base(ours) || !setup.waba) return;
+    forward = active;
+    if (wc.phone_number) fixes.push({ path: setup.phoneId, payload: { webhook_configuration: { override_callback_uri: ours, verify_token: verify } }, token: token });
+    else fixes.push({ path: setup.waba + '/subscribed_apps', payload: { override_callback_uri: ours, verify_token: verify }, token: token });
   });
   var text = lines.join('\n') || 'Nothing to check (no Phone Number ID / token in WhatsApp Setup).';
-  if (!fixes.length) { ccAlert_(text + '\n\nNo override pointing elsewhere was found.'); return; }
-  if (!ccConfirm_(text + '\n\nPoint these at this sheet now? (Replies are still passed on to the old bot if WA_FORWARD_URL is set.)')) return;
-  var token = waToken_(CC.BRANDS[1][0]) || waToken_(CC.BRANDS[0][0]), done = [];
+  if (!fixes.length) { ccAlert_(text + '\n\nNothing to change.'); return; }
+  if (!ccConfirm_(text + '\n\nSend WhatsApp messages to this sheet now?\nThe sheet then passes every message on to the current address, so whatever it does today keeps working.')) return;
+  var done = [];
+  if (forward && base(forward) !== base(ours)) { p.setProperty(WAH.FORWARD_PROP, forward); done.push('Messages are passed on to ' + base(forward)); }
   fixes.forEach(function (f) {
-    var r = waGraph_(f.path, token, 'post', f.payload);
-    done.push(f.path + ': ' + (r.code === 200 ? 'done' : 'failed ' + r.code + ' ' + ((r.body.error && r.body.error.message) || '')));
+    var r = waGraph_(f.path, f.token, 'post', f.payload);
+    done.push(f.path + ': ' + (r.code === 200 ? 'now points to this sheet' : 'failed ' + r.code + ' ' + ((r.body.error && r.body.error.message) || '')));
   });
   ccAlert_(done.join('\n') + '\n\nSend a WhatsApp message to the business number to test.');
 }
