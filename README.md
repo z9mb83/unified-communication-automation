@@ -40,7 +40,7 @@ The complete code from before this layout is on the branch `v1-before-master-she
 | **Settings** | WhatsApp live switch + test numbers, and switch-over status |
 | Mail Control XX / Mail Log XX | Hidden technical tabs used by the mail tool (settings follow the Limits tab) |
 
-Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, add a sending mailbox, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off) · Dashboard (create access key, show feed link).
+Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, add a sending mailbox, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off, set up reply webhook) · Dashboard (create access key, show feed link).
 
 **Send to selected rows** (select rows in a brand tab, then the menu item): sends right away, ignoring sending hours,
 gap and brand limits. Still respected: Mail/WhatsApp On in Limits, Do Not Contact, already sent, mailbox daily limits (mail),
@@ -56,6 +56,12 @@ mailbox is skipped. The same command fixes a mailbox whose report says `invalid_
 length; no links, spam words or exclamation marks; personalised from Details), each lead's email domain is checked
 before sending (dead domains are skipped instead of bouncing), and bounces found by the reports are marked
 **Bounced** and added to **Do Not Contact**. OpenAI key: `mail/OPENAI_KEY.md`.
+
+**WhatsApp replies** (Meta webhook → this sheet's script, free): when a customer writes back, the brand tab gets
+*WhatsApp replied = Yes*, the time and the message (columns V-X), and every message is listed in the tab
+**WhatsApp Replies**. Column U shows delivery (*Delivered* / *Read* / *Failed: reason*). A reply of just "STOP" adds the
+number to **Do Not Contact**. Setup: menu WhatsApp → *Set up reply webhook*, paste the callback URL and verify token into
+Meta (WhatsApp → Configuration → Webhook). Code: `doPost` / `waApplyWebhook_` in `whatsapp/WhatsApp.gs`.
 
 ## How limits work
 - **Mail**: the sender runs every 5 minutes (10:00-17:55, Mon-Sat) and sends at most one email per brand per run,

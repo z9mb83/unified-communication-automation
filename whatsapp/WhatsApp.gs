@@ -459,3 +459,216 @@ function waRun_() {
   }
   return out;
 }
+
+/* ============================== incoming replies (Meta webhook) ==============================
+ * Meta calls this script's web app (the same deployment as the dashboard feed) for every WhatsApp
+ * message a customer sends us and for delivery updates of what we sent.
+ *   - replies:   brand tab V:X (replied, replied at, last reply) + one row per message in "WhatsApp Replies"
+ *   - delivery:  brand tab U ("Delivered" / "Read" / "Failed: <reason>") - column R is never changed
+ *   - STOP:      a reply of just STOP / unsubscribe adds the phone to Do Not Contact
+ * The callback URL carries a secret ?key= (Script Property WA_HOOK_KEY); requests without it are ignored.
+ * Optional Script Property WA_FORWARD_URL: every webhook body is passed on to that URL too
+ * (to keep an older WhatsApp bot working).
+ * Menu: AUTOMATION > WhatsApp > Set up reply webhook.
+ */
+
+var WAH = {
+  HOOK_PROP: 'WA_HOOK_KEY', VERIFY_PROP: 'WA_VERIFY_TOKEN', FORWARD_PROP: 'WA_FORWARD_URL',
+  STOP_WORDS: ['stop', 'unsubscribe', 'stop all', 'opt out', 'optout', 'remove me', 'stop messages'],
+  RANK: { delivered: 1, read: 2 }
+};
+
+/** Text shown for a customer message of any type. */
+function waMessageText_(m) {
+  var t = m.type || 'message', media = m[t] || {};
+  if (t === 'text') return (m.text && m.text.body) || '';
+  if (t === 'button') return (m.button && m.button.text) || '';
+  if (t === 'interactive') {
+    var i = m.interactive || {};
+    return (i.button_reply && i.button_reply.title) || (i.list_reply && i.list_reply.title) || '[interactive]';
+  }
+  if (t === 'reaction') return 'Reacted ' + ((m.reaction && m.reaction.emoji) || '');
+  if (['image', 'video', 'document', 'audio', 'sticker'].indexOf(t) !== -1) return '[' + t + ']' + (media.caption ? ' ' + media.caption : '');
+  return '[' + t + ']';
+}
+
+/** Meta webhook JSON -> {messages:[{id, from, name, time, type, text, context}], statuses:[{id, status, to, time, error}]} */
+function waParseWebhook_(body) {
+  var out = { messages: [], statuses: [] };
+  ((body && body.entry) || []).forEach(function (entry) {
+    (entry.changes || []).forEach(function (change) {
+      var v = change.value || {}, names = {};
+      (v.contacts || []).forEach(function (c) { names[c.wa_id] = (c.profile && c.profile.name) || ''; });
+      (v.messages || []).forEach(function (m) {
+        out.messages.push({ id: String(m.id || ''), from: String(m.from || ''), name: names[m.from] || '',
+          time: Number(m.timestamp || 0), type: String(m.type || ''), text: waMessageText_(m),
+          context: String((m.context && m.context.id) || '') });
+      });
+      (v.statuses || []).forEach(function (st) {
+        var err = (st.errors && st.errors[0]) || null;
+        out.statuses.push({ id: String(st.id || ''), status: String(st.status || ''), to: String(st.recipient_id || ''),
+          time: Number(st.timestamp || 0),
+          error: err ? (String(err.code || '') + ' ' + String((err.error_data && err.error_data.details) || err.title || err.message || '')).trim() : '' });
+      });
+    });
+  });
+  return out;
+}
+
+function waIsStop_(text) {
+  return WAH.STOP_WORDS.indexOf(String(text || '').trim().toLowerCase().replace(/[.!\s]+$/, '')) !== -1;
+}
+
+/**
+ * Which lead row a message belongs to. tabs = {code: rows (A:X display values from row 3)}.
+ * 1) the message we sent that they replied to (context id = column T); 2) same phone, most recently messaged.
+ */
+function waMatchLead_(tabs, from, contextId, cc) {
+  var C = CC.COL, best = null;
+  Object.keys(tabs).forEach(function (code) {
+    tabs[code].forEach(function (r, i) {
+      var hit = { code: code, row: i + 3, name: String(r[C.NAME - 1] || '').trim(), sentAt: String(r[C.WA_SENT_AT - 1] || '') };
+      if (contextId && String(r[C.WA_ID - 1] || '').trim() === contextId) { hit.exact = true; if (!best || !best.exact) best = hit; return; }
+      if (best && best.exact) return;
+      var phone;
+      try { phone = waNormalizePhone_(r[C.PHONE - 1], cc); } catch (e) { return; }
+      if (phone !== from) return;
+      if (!best || hit.sentAt > best.sentAt) best = hit;
+    });
+  });
+  return best;
+}
+
+/** Delivery label for column U, never downgraded (Read beats Delivered; Failed always shown). */
+function waDeliveryLabel_(current, status, error) {
+  if (status === 'failed') return 'Failed: ' + (error || 'unknown reason');
+  var label = status === 'read' ? 'Read' : status === 'delivered' ? 'Delivered' : '';
+  if (!label) return current;
+  var cur = String(current || '').toLowerCase();
+  if ((WAH.RANK[cur] || 0) > WAH.RANK[status]) return current;
+  return label;
+}
+
+function waStampFromEpoch_(sec) {
+  return Utilities.formatDate(sec ? new Date(sec * 1000) : new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+}
+
+/** Applies one parsed webhook to the sheet. Returns {replies, statuses, stops}. */
+function waApplyWebhook_(parsed) {
+  var C = CC.COL, cc = ccSetting_('Default country code') || '91', done = { replies: 0, statuses: 0, stops: 0 };
+  if (!parsed.messages.length && !parsed.statuses.length) return done;
+  var tabs = {}, sheets = {};
+  CC.BRANDS.forEach(function (b) {
+    var sh = ccSs_().getSheetByName(b[0]);
+    if (!sh) return;
+    if (sh.getMaxColumns() < CC.LEAD_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), CC.LEAD_HEADERS.length - sh.getMaxColumns());
+    if (String(sh.getRange(2, C.WA_REPLY).getValue()) !== CC.LEAD_HEADERS[C.WA_REPLY - 1]) {
+      sh.getRange(2, C.WA_DELIVERY, 1, 4).setValues([CC.LEAD_HEADERS.slice(C.WA_DELIVERY - 1, C.WA_REPLY)]).setFontWeight('bold');
+      sh.getRange(1, C.WA_DELIVERY, sh.getMaxRows(), 4).setNumberFormat('@');
+    }
+    sheets[b[0]] = sh;
+    tabs[b[0]] = mlReadDisplay_(sh, 3, 1, CC.LEAD_HEADERS.length);
+  });
+
+  // delivery updates for messages we sent (matched on the message ID in column T)
+  parsed.statuses.forEach(function (st) {
+    Object.keys(tabs).some(function (code) {
+      return tabs[code].some(function (r, i) {
+        if (String(r[C.WA_ID - 1] || '').trim() !== st.id) return false;
+        var label = waDeliveryLabel_(r[C.WA_DELIVERY - 1], st.status, st.error);
+        if (label !== r[C.WA_DELIVERY - 1]) { sheets[code].getRange(i + 3, C.WA_DELIVERY).setValue(label); r[C.WA_DELIVERY - 1] = label; done.statuses++; }
+        return true;
+      });
+    });
+  });
+
+  if (!parsed.messages.length) return done;
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  var replySheet = ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: false }).sheet;
+  var seen = {};
+  if (replySheet.getLastRow() >= 2) {
+    var first = Math.max(2, replySheet.getLastRow() - 300);
+    replySheet.getRange(first, 8, replySheet.getLastRow() - first + 1, 1).getDisplayValues().forEach(function (r) { seen[r[0]] = true; });
+  }
+  var dnc = ccSheet_('Do Not Contact'), dncPhones = {};
+  mlReadDisplay_(dnc, 2, 1, 5).forEach(function (r) {
+    try { if (String(r[4]).trim()) dncPhones[waNormalizePhone_(r[4], cc)] = true; } catch (e) { /* ignore */ }
+  });
+  parsed.messages.forEach(function (m) {
+    if (!m.id || seen[m.id] || (cache && cache.get('wam_' + m.id))) return;  // Meta re-sends when unsure
+    seen[m.id] = true;
+    if (cache) { try { cache.put('wam_' + m.id, '1', 21600); } catch (e) { /* ignore */ } }
+    var lead = waMatchLead_(tabs, m.from, m.context, cc), stamp = waStampFromEpoch_(m.time);
+    var text = String(m.text || '').slice(0, 1000);
+    if (lead) {
+      sheets[lead.code].getRange(lead.row, C.WA_REPLIED, 1, 3).setValues([['Yes', stamp, text.slice(0, 500)]]);
+    }
+    replySheet.appendRow([stamp, lead ? lead.code : '', lead ? String(lead.row) : '', lead ? lead.name : m.name,
+      m.from, text, m.type, m.id]);
+    done.replies++;
+    if (waIsStop_(m.text) && !dncPhones[m.from]) {
+      dnc.appendRow(['', 'WhatsApp STOP reply', stamp, lead ? lead.code : '', m.from]);
+      dncPhones[m.from] = true;
+      done.stops++;
+    }
+  });
+  return done;
+}
+
+function waHookKeyOk_(given) {
+  var key = PropertiesService.getScriptProperties().getProperty(WAH.HOOK_PROP) || '';
+  return key.length >= 20 && String(given || '') === key;
+}
+
+/** GET from Meta when the callback URL is saved: echo hub.challenge if the verify token and key match. */
+function waVerifyWebhook_(p) {
+  var token = PropertiesService.getScriptProperties().getProperty(WAH.VERIFY_PROP) || '';
+  var ok = p['hub.mode'] === 'subscribe' && token && p['hub.verify_token'] === token && waHookKeyOk_(p.key);
+  return ContentService.createTextOutput(ok ? String(p['hub.challenge'] || '') : 'forbidden');
+}
+
+/** POST from Meta: a customer message or a delivery update. Always answers quickly with "ok". */
+function doPost(e) {
+  var reply = ContentService.createTextOutput('ok');
+  if (!e || !e.parameter || !waHookKeyOk_(e.parameter.key)) return reply;
+  var raw = (e.postData && e.postData.contents) || '';
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+    var done = waApplyWebhook_(waParseWebhook_(JSON.parse(raw || '{}')));
+    if (done.replies || done.statuses) Logger.log('WhatsApp webhook: ' + JSON.stringify(done));
+  } catch (err) {
+    Logger.log('WhatsApp webhook error: ' + (err && err.message));
+  } finally {
+    try { lock.releaseLock(); } catch (e2) { /* not held */ }
+  }
+  var forward = PropertiesService.getScriptProperties().getProperty(WAH.FORWARD_PROP);
+  if (forward && raw) {
+    try { UrlFetchApp.fetch(forward, { method: 'post', contentType: 'application/json', payload: raw, muteHttpExceptions: true, followRedirects: true }); }
+    catch (err) { Logger.log('WhatsApp webhook forward failed: ' + (err && err.message)); }
+  }
+  return reply;
+}
+
+/** Menu: creates the webhook key + verify token (once) and shows what to paste into Meta. */
+function waSetupWebhook() {
+  var p = PropertiesService.getScriptProperties();
+  if (!p.getProperty(WAH.HOOK_PROP)) p.setProperty(WAH.HOOK_PROP, Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''));
+  if (!p.getProperty(WAH.VERIFY_PROP)) p.setProperty(WAH.VERIFY_PROP, Utilities.getUuid().replace(/-/g, ''));
+  p.setProperty('SHEET_ID', ccSs_().getId());
+  ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
+  var url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { url = ''; }
+  if (!url) { ccAlert_('Deploy the web app first: Extensions > Apps Script > Deploy > New deployment > Web app (Execute as: Me, Access: Anyone).'); return; }
+  var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial;font-size:13px;line-height:1.5">' +
+    'Meta developer app &gt; <b>WhatsApp &gt; Configuration &gt; Webhook &gt; Edit</b>. Paste these two values, then <b>Verify and save</b>.' +
+    '<br>Keep them private (anyone with the URL could post fake replies into the sheet).<br><br>' +
+    '<b>Callback URL</b><textarea style="width:100%;height:70px" readonly onclick="this.select()">' + esc(url + '?key=' + p.getProperty(WAH.HOOK_PROP)) + '</textarea>' +
+    '<b>Verify token</b><textarea style="width:100%;height:32px" readonly onclick="this.select()">' + esc(p.getProperty(WAH.VERIFY_PROP)) + '</textarea>' +
+    '<br>Webhook fields: <b>messages</b> must be Subscribed. Replies then appear in the brand tabs (columns V-X) and in the tab "WhatsApp Replies".' +
+    '</div>').setWidth(520).setHeight(330);
+  SpreadsheetApp.getUi().showModalDialog(html, 'WhatsApp reply webhook');
+}

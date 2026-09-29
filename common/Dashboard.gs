@@ -134,6 +134,8 @@ function dbKeyOk_(given) {
 }
 
 function doGet(e) {
+  // Meta's one-time webhook check (WhatsApp replies) - see waVerifyWebhook_ in WhatsApp.gs.
+  if (e && e.parameter && e.parameter['hub.mode']) return waVerifyWebhook_(e.parameter);
   var out;
   if (!dbKeyOk_(e && e.parameter && e.parameter.key)) out = { error: 'unauthorized' };
   else {

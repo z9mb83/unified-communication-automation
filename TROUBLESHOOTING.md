@@ -62,6 +62,15 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | "Send WhatsApp to selected rows" skips a row | Consent = Yes, not Do Not Contact, not Sent; test mode sends only to test numbers | `whatsapp/WhatsApp.gs` (`waForceCheck_`) |
 | Automatic sending stopped | Menu **Turn automatic sending ON** | `whatsapp/WhatsApp.gs` (`waAutoOn`) |
 
+## WhatsApp replies (webhook)
+| Error / symptom | Fix | File |
+|---|---|---|
+| Meta: "callback URL or verify token couldn't be validated" | Web app not redeployed with a new version, or token/URL pasted wrongly; re-open menu *Set up reply webhook* and copy again | `whatsapp/WhatsApp.gs` (`waVerifyWebhook_`), `common/Dashboard.gs` (`doGet`) |
+| Replies not appearing | Meta → Webhook fields: `messages` Subscribed; Apps Script → Executions: look for `doPost` errors | `whatsapp/WhatsApp.gs` (`doPost`, `waApplyWebhook_`) |
+| Reply listed but Brand empty | Phone not found in any brand tab (column O) | `whatsapp/WhatsApp.gs` (`waMatchLead_`) |
+| Old auto-reply bot stopped | Only one webhook per Meta app; set Script Property `WA_FORWARD_URL` to the old bot's URL to keep it | `whatsapp/WhatsApp.gs` (`doPost`) |
+| Delivery column U stays empty | Status updates come only for messages sent after the webhook was switched | — |
+
 ## Mail: send to selected rows
 | Status / message | Fix | File |
 |---|---|---|
