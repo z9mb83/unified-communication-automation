@@ -77,10 +77,17 @@ PY
   regen-preview|regen)
     ARGS="--regenerate-drafts"; [ "$1" = regen-preview ] && ARGS="$ARGS,--dry-run"
     [ -n "${2:-}" ] && ARGS="$ARGS,--brand,$2"
-    EXEC=$(gcloud run jobs execute email-sender-master --region $R --args="$ARGS" --wait --format='value(metadata.name)')
-    echo "execution: $EXEC - reading its output..."; sleep 20
-    gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
-      --order=asc --freshness=2h --format='value(textPayload)' | grep -v '^$'
+    # regen repeats (up to 8 rounds of ~250 drafts) until every old-format draft is rewritten.
+    for ROUND in 1 2 3 4 5 6 7 8; do
+      EXEC=$(gcloud run jobs execute email-sender-master --region $R --args="$ARGS" --wait --format='value(metadata.name)')
+      echo "== round $ROUND (execution $EXEC)"; sleep 20
+      OUT=$(gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
+        --order=asc --freshness=2h --format='value(textPayload)' | grep -v '^$' | grep -v 'httplib2 transport')
+      echo "$OUT"
+      [ "$1" = regen ] || break
+      if echo "$OUT" | grep -q 'sender is running right now'; then sleep 60; continue; fi
+      echo "$OUT" | grep -q 'Run the same command again' || break
+    done
     ;;
   sender)
     BASE=$(img email-sender)

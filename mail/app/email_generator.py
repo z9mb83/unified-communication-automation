@@ -98,6 +98,7 @@ SPAM_PHRASES = [
     "amazing", "incredible", "exclusive deal", "once in a lifetime", "increase sales", "double your",
     "hope this email finds you well", "i hope this finds you well", "touch base", "circle back",
     "synergy", "leverage", "revolutionary", "game-changer", "game changer",
+    "didn't see any details", "did not see any details", "no details", "your profile caught",
 ]
 _LINK = re.compile(r"(https?://|www\.|\.com\b|\.in\b)", re.IGNORECASE)
 
@@ -129,12 +130,17 @@ def first_name(person_name: str) -> str:
     return name[:1].upper() + name[1:].lower() if name.isupper() or name.islower() else name
 
 
-def pick_brief(brand: BrandConfig, person_name: str, rng: random.Random | None = None) -> dict:
+# Openings that need something specific about the recipient (used only when Details is filled in).
+DETAIL_OPENINGS = {0, 4}
+
+
+def pick_brief(brand: BrandConfig, person_name: str, rng: random.Random | None = None, details: str = "") -> dict:
     rng = rng or random.Random()
     name = first_name(person_name)
     low, high = rng.choice(LENGTHS)
+    openings = OPENINGS if str(details or "").strip() else [o for i, o in enumerate(OPENINGS) if i not in DETAIL_OPENINGS]
     return {
-        "opening": rng.choice(OPENINGS),
+        "opening": rng.choice(openings),
         "angle": rng.choice(ANGLES.get(brand.brand_id, DEFAULT_ANGLES)),
         "cta": rng.choice(CALLS_TO_ACTION),
         "greeting": (rng.choice(GREETINGS).format(name=name) if name else rng.choice(GREETINGS_NO_NAME)),
@@ -205,6 +211,9 @@ def _input(brief: dict, person_name: str, details: str, feedback: str = "") -> s
         f"- Length: {low} to {high} words (body only).\n"
         f"- End the body with this exact sentence on its own line: {brief['opt_out']}"
     )
+    if not str(details or "").strip():
+        text += ("\n- Nothing is known about this recipient. Do NOT say that, do NOT mention details, a profile, "
+                 "their business or anything you 'saw' or 'noticed' about them. Write a short general note that fits anyone.")
     if feedback:
         text += f"\n\nYour previous draft had problems ({feedback}). Rewrite it without them."
     return text
@@ -247,7 +256,7 @@ def generate_email(
     if not runtime.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is missing (Secret Manager secret openai-api-key)")
     client = _client(runtime)
-    brief = pick_brief(brand, person_name, rng)
+    brief = pick_brief(brand, person_name, rng, details)
     subject, body = _ask(client, runtime, brand, _input(brief, person_name, details))
     problems = spam_problems(subject, body)
     if problems:
