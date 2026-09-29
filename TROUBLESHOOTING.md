@@ -42,17 +42,38 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Status / message | Fix | File |
 |---|---|---|
 | `WhatsApp Setup incomplete` | Fill Phone Number ID, WABA ID, Template name | **WhatsApp Setup** tab |
-| `no access token saved` / `Access token problem` | Menu **Save access token** (new token) | `whatsapp/WhatsApp.gs` (`waSaveToken`) |
+| `no access token saved` / `Access token problem` | Menu **Save access token**: one box, paste the token (starts `EAA`), OK. Meta never shows an old token again - generate a new one (Business Settings -> System users -> Generate token, expiry Never) | `whatsapp/WhatsApp.gs` (`waSaveToken`) |
+| `WhatsApp is OFF for XX` | **Limits** -> that brand's WhatsApp row -> On = Yes | **Limits** tab |
+| "only test numbers" / `Waiting (test mode)` | Safety switch, not Meta: add the number to **Settings -> WhatsApp test numbers** (comma separated, with 91) or set live sending = Yes | `common/Core.gs`, `whatsapp/WhatsApp.gs` (`waForceCheck_`) |
 | Template `not found` / wrong language / not `APPROVED` / `not supported` | Correct name + language; text-only header, ≤4 variables | `whatsapp/WhatsApp.gs` (`waFetchTemplate_`, `waParseTemplate_`) |
-| "Sent" but never arrives (image templates) | Meta could not fetch the image; the sheet now uploads it itself - check **Header media URL** opens the image | `whatsapp/WhatsApp.gs` (`waHeaderRef_`) |
+| "Sent" but never arrives (image templates) | Was: Meta could not fetch Google Sites image links. Fixed 29 Sep: the sheet uploads the image to Meta itself - check **Header media URL** opens the image | `whatsapp/WhatsApp.gs` (`waHeaderRef_`) |
+| "Sent" but never arrives (any template) | Meta accepted it but did not deliver: usually Meta's marketing-message limit per person (error 131049) or the person blocked marketing. Test: have them send "Hi" to +91 76588 74146, then resend. Exact reason needs the reply/status listener (not built yet) | Meta WhatsApp Manager |
 | `Could not download the header image` / `not a JPG/PNG` | Use a direct image link; Drive files must be shared "Anyone with the link"; other hosts must be in `urlFetchWhitelist` | `whatsapp/WhatsApp.gs` (`waDirectLink_`), `common/appsscript.json` |
 | `Var n is empty` | Set **Var n = column** or fill that column | **WhatsApp Setup** tab |
-| `Waiting (test mode)` | **Settings** → WhatsApp live sending = Yes | `common/Core.gs` |
 | `Retry` | Rate limit; resent next run | `whatsapp/WhatsApp.gs` (`waClassifyError_`) |
 | `Uncertain` | Check WhatsApp Manager before clearing status | same |
 | `daily/hourly limit reached`, `waiting for the gap` | **Limits** → WhatsApp row | `whatsapp/WhatsApp.gs` (`waAllowance_`) |
 | "Send WhatsApp to selected rows" skips a row | Consent = Yes, not Do Not Contact, not Sent; test mode sends only to test numbers | `whatsapp/WhatsApp.gs` (`waForceCheck_`) |
 | Automatic sending stopped | Menu **Turn automatic sending ON** | `whatsapp/WhatsApp.gs` (`waAutoOn`) |
 
+## Mail: send to selected rows
+| Status / message | Fix | File |
+|---|---|---|
+| `All mailboxes reached their daily limit` | Normal late in the day; wait for tomorrow or raise a mailbox's daily limit slightly (**Mailboxes** tab) | `mail/app/send_now.py` (`pick_mailbox`) |
+| Row still `Pending` | Menu **Mail -> Show send-now results** -> start again | `mail/sheet/Mail.gs` (`mlShowSendNow`) |
+
+## Dashboard (Vercel)
+| What you see | Fix | Where |
+|---|---|---|
+| `feed: unauthorized ... (N characters; a sheet key has 64)` | The wrong text was pasted as `SHEET_API_KEY` (happened on 29 Sep: 114 characters). Sheet: **Dashboard -> Create access key**, copy all 64 characters; Vercel: edit `SHEET_API_KEY`, save, **Redeploy** | Vercel settings |
+| Changed a Vercel setting, nothing changed | Settings apply only to new deployments: **Deployments -> ... -> Redeploy** | Vercel |
+| "Dashboard password is not configured" / password not accepted | `DASHBOARD_PASSWORD` missing. Variables typed into the import form after the project already exists are **not saved** - add them in **Settings -> Environment Variables**, then Redeploy | Vercel settings |
+| Deployment `Canceled` / `Error` | Open the deployment's build log; locally `npm test && npm run build` | `automation-dashboard` repo |
+| `feed did not return JSON` | Feed not deployed with access **Anyone**, or `SHEET_API_URL` not the `/exec` link from **Show feed link** | `common/Dashboard.gs` deployment |
+| `snapshot failed: ...` | A tab was renamed/removed: **Set up / repair tabs** | `common/Dashboard.gs` (`dbSnapshot_`) |
+| Changed `Dashboard.gs` but data unchanged | Web app serves a fixed version: Apps Script **Deploy -> Manage deployments -> edit -> New version** | Apps Script |
+| Showing "sample data" banner | `SHEET_API_URL`/`SHEET_API_KEY` empty on Vercel | Vercel settings |
+| Wrong numbers / chart | Counting: `common/Dashboard.gs` (`dbLeadStats_`); display: `app/page.js`, `components/charts.js` | both repos |
+
 ## Before pasting / deploying a fix
-`node --test common/test/sheet.test.js` · `cd mail && python -m unittest test_mail_limits test_daily_report test_send_now`
+`node --test common/test/sheet.test.js` · `cd mail && python -m unittest test_mail_limits test_daily_report test_send_now` · dashboard repo: `npm test && npm run build`
