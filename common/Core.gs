@@ -106,6 +106,9 @@ function onOpen() {
       .addItem('Send now (within limits)', 'waSendNow')
       .addItem('Turn automatic sending ON (every 5 min)', 'waAutoOn')
       .addItem('Turn automatic sending OFF', 'waAutoOff'))
+    .addSubMenu(ui.createMenu('Dashboard')
+      .addItem('Create access key', 'dbCreateKey')
+      .addItem('Show feed link', 'dbShowLink'))
     .addToUi();
 }
 

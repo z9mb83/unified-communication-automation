@@ -14,5 +14,9 @@
   "urlFetchWhitelist": [
     "https://graph.facebook.com/",
     "https://run.googleapis.com/"
-  ]
+  ],
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE_ANONYMOUS"
+  }
 }
