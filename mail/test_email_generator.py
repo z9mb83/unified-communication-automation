@@ -64,6 +64,17 @@ class GeneratorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_gen([bad, bad])
 
+    def test_no_details_brief(self):
+        rng = random.Random(3)
+        for _ in range(30):
+            b = eg.pick_brief(BRAND, "Aryan", rng, details="")
+            self.assertNotIn(b["opening"], [eg.OPENINGS[i] for i in eg.DETAIL_OPENINGS])
+        client = FakeClient([GOOD])
+        with patch.object(eg, "_client", lambda runtime: client):
+            eg.generate_email(RUNTIME, BRAND, "Aryan", "", random.Random(1))
+        self.assertIn("Nothing is known about this recipient", client.prompts[0])
+        self.assertTrue(eg.spam_problems("hello there", "I didn't see any details about you."))
+
     def test_spam_problems(self):
         self.assertEqual(eg.spam_problems("ideas for your cafe", "We could help you learn more."), [])
         p = eg.spam_problems("Act Now", "- one\n- two\nhttps://x.com")
