@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -10,6 +11,36 @@ from zoneinfo import ZoneInfo
 from app import credential_store
 from app.config_loader import BrandConfig
 from app.utilities import number, pad, parse_datetime, yes
+
+
+# Mail Control rows 13..60 hold the brand's mailboxes (built-in ones plus any added from the
+# sheet menu "Add a sending mailbox").
+MAILBOX_FIRST_ROW = 13
+MAILBOX_LAST_ROW = 60
+
+
+def mailbox_range(brand: BrandConfig) -> str:
+    return f"'{brand.control_tab}'!A{MAILBOX_FIRST_ROW}:M{MAILBOX_LAST_ROW}"
+
+
+def with_sheet_mailboxes(brand: BrandConfig, rows: list[list[Any]]) -> BrandConfig:
+    """Brand config whose sender list also contains mailboxes added in the sheet.
+
+    A sheet-added mailbox is only used once its Gmail is connected (credential_store.has_credentials).
+    """
+    accounts = list(brand.gmail_accounts)
+    for raw in rows:
+        email = str((raw or [""])[0] or "").strip().lower()
+        if email and "@" in email and email not in accounts:
+            accounts.append(email)
+    if len(accounts) == len(brand.gmail_accounts):
+        return brand
+    try:
+        return replace(brand, gmail_accounts=accounts)
+    except TypeError:  # not a dataclass (test doubles)
+        clone = copy.copy(brand)
+        clone.gmail_accounts = accounts
+        return clone
 
 
 @dataclass

@@ -53,5 +53,25 @@ class ProfileTest(unittest.TestCase):
         self.assertEqual([b[6] for b in old], [b[6] for b in new])
 
 
+
+
+class SheetMailboxesTest(unittest.TestCase):
+    def test_with_sheet_mailboxes_adds_new_only(self):
+        from dataclasses import dataclass, field
+        from app.limit_manager import with_sheet_mailboxes, mailbox_range
+
+        @dataclass(frozen=True)
+        class B:
+            control_tab: str = "Mail Control SB"
+            gmail_accounts: list = field(default_factory=lambda: ["a@gmail.com"])
+
+        b = B()
+        self.assertIs(with_sheet_mailboxes(b, [["a@gmail.com"], [""], []]), b)
+        nb = with_sheet_mailboxes(b, [["A@gmail.com"], [" New@Gmail.com "], ["not-an-email"]])
+        self.assertEqual(nb.gmail_accounts, ["a@gmail.com", "new@gmail.com"])
+        self.assertEqual(b.gmail_accounts, ["a@gmail.com"])
+        self.assertEqual(mailbox_range(b), "'Mail Control SB'!A13:M60")
+
+
 if __name__ == "__main__":
     unittest.main()

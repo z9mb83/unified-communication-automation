@@ -14,12 +14,12 @@ from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 
-from reply_sheet import earliest_replies, mark_replied
+from reply_sheet import bounced_leads, earliest_replies, mark_bounced, mark_replied
 from report_core import DAYS, EVENING_HOUR, MORNING_HOUR, Report, parse_log, render, replies_in_thread, reply_window_start, window
 
 RECIPIENT = "info@99marketingservices.com"
 SENDER = "linkwithmarketing@gmail.com"
-HEADERS = ["From", "Subject", "Auto-Submitted", "X-Autoreply", "X-Autorespond"]
+HEADERS = ["From", "Subject", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "X-Failed-Recipients"]
 
 
 def error_kind(error):
@@ -108,6 +108,7 @@ def collect(brands, start, end, sheet_factory, service_factory, reply_start=None
             replies, automated, responded = replies_in_thread(thread.get("messages", []), sent_events, end)
             replied_leads.update((e.brand, e.recipient) for e in sent_events if (e.sender, e.message_id) in responded)
             report.all_replies.extend(replies)
+            report.all_bounces.extend(a for a in automated if a.get("lead"))
             for target, found, seen in ((report.replies, replies, seen_reply), (report.automated, automated, seen_auto)):
                 for reply in found:
                     key = (mailbox, reply["id"])
@@ -133,7 +134,7 @@ def collect(brands, start, end, sheet_factory, service_factory, reply_start=None
 def collect_plans(brands, sheet_factory, tz, now):
     """Tomorrow's plan per brand, read from the lead and control tabs (read-only)."""
     from app.approval_manager import can_generate, is_approved_at
-    from app.limit_manager import read_mailboxes_from_rows
+    from app.limit_manager import mailbox_range, read_mailboxes_from_rows, with_sheet_mailboxes
     from app.utilities import number, yes
     plans, warnings, sheets = [], [], {}
     for brand in brands:
@@ -144,7 +145,8 @@ def collect_plans(brands, sheet_factory, tz, now):
             quote = lambda tab: "'" + tab.replace("'", "''") + "'"
             leads = [list(r) + [""] * max(0, 12 - len(r)) for r in sheet.get(f"{quote(brand.lead_tab)}!A3:L")]
             settings = {str(r[0]).strip(): str(r[1]).strip() for r in sheet.get(f"{quote(brand.control_tab)}!A2:C10") if len(r) >= 2}
-            mailbox_rows = sheet.get(f"{quote(brand.control_tab)}!A13:M{12 + max(len(brand.gmail_accounts), 1)}")
+            mailbox_rows = sheet.get(mailbox_range(brand))
+            brand = with_sheet_mailboxes(brand, mailbox_rows)
             mailboxes = read_mailboxes_from_rows(brand, mailbox_rows, [], now, tz,
                                                  number(settings.get("Default daily limit"), brand.daily_limit),
                                                  number(settings.get("Default hourly limit"), brand.hourly_limit))
@@ -248,6 +250,7 @@ def main():
         for warning in report.warnings:
             print("Warning:", warning)
         print(f"Replied leads found (not written in dry-run): {len(earliest_replies(report.all_replies))}")
+        print(f"Bounced leads found (not written in dry-run): {len(bounced_leads(report.all_bounces))}")
         return
     brand = next(b for b in brands if SENDER in b.gmail_accounts)
     service = gmail_service(brand, SENDER)
@@ -273,6 +276,13 @@ def update_reply_columns(brands, report):
             print("Warning:", warning)
     except Exception as error:
         print("Warning: reply status not written:", error_kind(error))
+    try:
+        marked, listed, warnings = mark_bounced(brands, bounced_leads(report.all_bounces), lambda sid: SheetClient(sid))
+        print(f"Bounces: {marked} lead row(s) marked Bounced, {listed} address(es) added to Do Not Contact.")
+        for warning in warnings:
+            print("Warning:", warning)
+    except Exception as error:
+        print("Warning: bounce status not written:", error_kind(error))
 
 
 if __name__ == "__main__":

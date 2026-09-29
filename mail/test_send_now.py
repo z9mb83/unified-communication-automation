@@ -39,7 +39,7 @@ def data(stop="No", lead=None, logs=None, boxes=None):
     return {
         "'Mail Control 99M'!A2:C10": [["Emergency stop", stop], ["Cc email", "info@x.com"]],
         "'Mail Log 99M'!A2:I": logs or [],
-        "'Mail Control 99M'!A13:M14": boxes or [["a@gmail.com", "Yes", "Stage 1", "2", "1"], ["b@gmail.com", "Yes", "Stage 1", "1", "1"]],
+        "'Mail Control 99M'!A13:M60": boxes or [["a@gmail.com", "Yes", "Stage 1", "2", "1"], ["b@gmail.com", "Yes", "Stage 1", "1", "1"]],
         "'Do Not Contact'!A2:C": [["stop@x.com"]],
         "'99M'!A5:L5": [lead or ["Aryan", "lead@x.com", "", "Hi", "Body", "Generated", "", "", "", "", "", ""]],
         "'Mail Send Now'!A2:H": [["t", "99M", "5", "lead@x.com", "me", "Pending"], ["t", "99M", "6", "x@x.com", "me", "Sent"]],
@@ -63,6 +63,7 @@ ITEM = {"queue_row": 2, "code": "99M", "row": 5, "email": "lead@x.com"}
 
 
 @patch.object(send_now, "PAUSE_SECONDS", 0)
+@patch.object(send_now, "domain_problem", lambda email: "email domain does not exist" if email.endswith("@dead.invalid") else "")
 @patch.object(send_now.credential_store, "has_credentials", lambda b, m: True)
 class SendNowTest(unittest.TestCase):
     def run_items(self, sheet, items=None, send=None):
@@ -113,6 +114,27 @@ class SendNowTest(unittest.TestCase):
         self.assertEqual(results[0][1], "Failed")
         self.assertEqual(runner.errors[0][:2], (5, "Failed"))
         self.assertTrue(any(r[0] == "'Mail Log 99M'!A:I" for r in sheet.writes))
+
+    def test_sheet_added_mailbox_is_used_when_connected(self):
+        boxes = [["a@gmail.com", "Yes", "Stage 1", "0", "1"], ["b@gmail.com", "Yes", "Stage 1", "0", "1"],
+                 ["new@gmail.com", "Yes", "Stage 1", "3", "1"]]
+        results, runner = self.run_items(FakeSheet(data(boxes=boxes)))
+        self.assertEqual(results[0][1:], ("Sent", "Sent from new@gmail.com"))
+
+    def test_sheet_added_mailbox_skipped_until_connected(self):
+        boxes = [["a@gmail.com", "No", "Stage 1", "3", "1"], ["b@gmail.com", "No", "Stage 1", "3", "1"],
+                 ["new@gmail.com", "Yes", "Stage 1", "3", "1"]]
+        with patch.object(send_now.credential_store, "has_credentials", lambda b, m: m != "new@gmail.com"):
+            results, _ = self.run_items(FakeSheet(data(boxes=boxes)))
+        self.assertEqual(results[0][1], "Skipped")
+
+    def test_dead_domain_is_skipped(self):
+        item = dict(ITEM, email="lead@dead.invalid")
+        sheet = FakeSheet(data(lead=["Aryan", "lead@dead.invalid", "", "Hi", "Body", "Generated", "", "", "", "", "", ""]))
+        results, runner = self.run_items(sheet, items=[item])
+        self.assertEqual(results[0][1], "Skipped")
+        self.assertIn("would bounce", results[0][2])
+        self.assertEqual(runner.recorded, [])
 
     def test_process_queue_writes_status_back(self):
         sheet = FakeSheet(data())

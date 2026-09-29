@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from daily_report import collect, collect_plans, deliver_once, error_kind
-from reply_sheet import earliest_replies, mark_replied, plan_updates
-from report_core import Activity, Report, parse_log, render, replies_in_thread, reply_window_start, window
+from reply_sheet import bounced_leads, earliest_replies, mark_bounced, mark_replied, plan_bounce_updates, plan_updates
+from report_core import is_bounce, Activity, Report, parse_log, render, replies_in_thread, reply_window_start, window
 
 TZ = timezone(timedelta(hours=5, minutes=30))
 
@@ -71,6 +71,41 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(replies, [])
         self.assertEqual(len(auto), 2)
         self.assertEqual(responded, set())
+
+    def test_bounce_detection_names_the_lead(self):
+        def notice(subject, failed=None, sender="mailer-daemon@googlemail.com", mid="b"):
+            m = message(mid=mid, sender=sender)
+            m["payload"]["headers"][1]["value"] = subject
+            if failed:
+                m["payload"]["headers"].append({"name": "X-Failed-Recipients", "value": failed})
+            return m
+        _, auto, _ = replies_in_thread([notice("Delivery Status Notification (Failure)", "lead@example.com")], [event()], at(25))
+        self.assertEqual((auto[0]["bounce"], auto[0]["lead"]), (True, "lead@example.com"))
+        _, auto, _ = replies_in_thread([notice("Delivery Status Notification (Delay)")], [event()], at(25))
+        self.assertNotIn("bounce", auto[0])
+        _, auto, _ = replies_in_thread([notice("Undeliverable: Hello")], [event()], at(25))
+        self.assertEqual(auto[0]["lead"], "lead@example.com")  # single recipient in the thread
+        _, auto, _ = replies_in_thread([notice("Failure", "someone@else.com")], [event()], at(25))
+        self.assertEqual(auto[0]["lead"], "")  # named address is not our lead: never guess
+        self.assertFalse(is_bounce("boss@x.com", "Out of office"))
+
+    def test_bounce_marks_only_sent_rows_and_lists_once(self):
+        bounced = bounced_leads([{"brand": "Marketing", "lead": "Lead@Example.com", "time": at(25, 9)},
+                                 {"brand": "Marketing", "lead": "", "time": at(25, 9)}])
+        self.assertEqual(list(bounced), [("Marketing", "lead@example.com")])
+        rows = [["A", "lead@example.com", "", "", "", "Sent"], ["B", "lead@example.com", "", "", "", "Replied"]]
+        updates = plan_bounce_updates("99M", rows, bounced, "Marketing")
+        self.assertEqual(updates[0], ("'99M'!F3", [["Bounced"]]))
+        self.assertEqual(len(updates), 2)
+        sheet = Mock()
+        sheet.get.side_effect = lambda rng: rows if rng.startswith("'99M'") else [["old@x.com"]]
+        brand = SimpleNamespace(brand_name="Marketing", sheet_id="S", lead_tab="99M", suppression_tab="Do Not Contact")
+        self.assertEqual(mark_bounced([brand], bounced, lambda sid: sheet), (1, 1, []))
+        sheet.append.assert_called_once_with("'Do Not Contact'!A:D", [["lead@example.com", "Bounced", "2026-09-25 09:00", "99M"]])
+        sheet.get.side_effect = lambda rng: rows if rng.startswith("'99M'") else [["lead@example.com"]]
+        sheet.append.reset_mock()
+        mark_bounced([brand], bounced, lambda sid: sheet)
+        sheet.append.assert_not_called()
 
     def test_partial_report_is_explicit(self):
         report = Report(at(24), at(25), warnings=["Mailbox unavailable"])

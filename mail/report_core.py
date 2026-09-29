@@ -38,6 +38,7 @@ class Report:
     lead_phones: dict = field(default_factory=dict)  # (brand, email) -> phone
     new_from: datetime | None = None  # replies after this are marked NEW (since the previous report)
     week_sent: list[Activity] = field(default_factory=list)  # sent in the last 7 days
+    all_bounces: list[dict] = field(default_factory=list)  # failed-delivery notices found, any date (item["lead"] = bounced lead)
 
 
 MORNING_HOUR, EVENING_HOUR = 10, 18
@@ -97,6 +98,19 @@ def parse_log(rows, brand, tz):
     return activities, warnings
 
 
+BOUNCE_WORDS = ("failure", "undeliverable", "undelivered", "not delivered", "delivery failed", "returned mail",
+                "could not be delivered", "delivery has failed", "rejected")
+
+
+def is_bounce(sender, subject, failed_recipients=""):
+    """A permanent failed-delivery notice (not a delay warning or an out-of-office)."""
+    subject = (subject or "").lower()
+    if "delay" in subject or "delayed" in subject:
+        return False
+    daemon = sender.split("@")[0] in {"mailer-daemon", "postmaster"}
+    return bool(failed_recipients) or (daemon and any(w in subject for w in BOUNCE_WORDS))
+
+
 def replies_in_thread(messages, events, end):
     """Only inbound messages from a contacted lead after its outreach are replies.
 
@@ -129,6 +143,14 @@ def replies_in_thread(messages, events, end):
         item = dict(brand=event.brand, mailbox=event.sender, sender=sender,
                     subject=headers.get("subject", ""), time=stamp, id=message["id"], sent_at=event.sent_at)
         if auto:
+            failed = headers.get("x-failed-recipients", "")
+            if is_bounce(sender, item["subject"], failed):
+                named = [a.strip().lower() for a in failed.split(",") if "@" in a]
+                recipients = {e.recipient for e in events}
+                lead = next((a for a in named if a in recipients), "")
+                if not lead and not named and len(recipients) == 1:
+                    lead = next(iter(recipients))
+                item["bounce"], item["lead"] = True, lead
             automated.append(item)
         else:
             replies.append(item)
