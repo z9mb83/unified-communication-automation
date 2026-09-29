@@ -18,9 +18,10 @@ from typing import Any
 from app import credential_store
 from app.config_loader import BrandConfig, approval_index
 from app.duplicate_manager import sent_recipients
+from app.domain_check import domain_problem
 from app.email_generator import generate_email
 from app.gmail_client import send_email
-from app.limit_manager import Mailbox, read_mailboxes_from_rows
+from app.limit_manager import Mailbox, mailbox_range, read_mailboxes_from_rows, with_sheet_mailboxes
 from app.send_logger import append_sheet_log
 from app.suppression_manager import suppressed_recipients
 from app.utilities import is_valid_email, normalize_email_address, now_text, number, pad, yes
@@ -87,8 +88,10 @@ class SendNow:
         cc_email = settings.get("Cc email", brand.mandatory_cc)
         logs = sheets.get(f"'{brand.send_log_tab}'!A2:I")
         now = now_fn()
+        mailbox_rows = sheets.get(mailbox_range(brand))
+        brand = self.brand = with_sheet_mailboxes(brand, mailbox_rows)
         mailboxes = read_mailboxes_from_rows(
-            brand, sheets.get(f"'{brand.control_tab}'!A13:M{12 + max(len(brand.gmail_accounts), 1)}"), logs, now,
+            brand, mailbox_rows, logs, now,
             self.runner.tz, number(settings.get("Default daily limit"), brand.daily_limit),
             number(settings.get("Default hourly limit"), brand.hourly_limit))
         suppressed = suppressed_recipients(sheets.get(f"'{brand.suppression_tab}'!A2:C"))
@@ -99,6 +102,10 @@ class SendNow:
                 time.sleep(PAUSE_SECONDS)
             row = pad((sheets.get(f"'{tab}'!A{item['row']}:L{item['row']}") or [[]])[0], 12)
             reason = check_row(row, item["email"], suppressed, already)
+            if not reason:
+                problem = domain_problem(item["email"])
+                if problem:
+                    reason = f"{problem} (would bounce)"
             if not reason and pick_mailbox(brand, mailboxes) is None:
                 reason = "All mailboxes reached their daily limit (or are paused/disconnected)"
             if reason:

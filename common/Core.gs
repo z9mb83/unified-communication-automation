@@ -96,7 +96,7 @@ function onOpen() {
       .addItem('Send mail to selected rows', 'mlSendSelected')
       .addItem('Show send-now results', 'mlShowSendNow')
       .addSeparator()
-      .addItem('Import leads from old email sheet (read-only)', 'mlImportFromOldSheet')
+      .addItem('Add a sending mailbox', 'mlAddMailbox')
       .addItem('Show mail status', 'mlShowStatus'))
     .addSubMenu(ui.createMenu('WhatsApp')
       .addItem('Send WhatsApp to selected rows', 'waSendSelected')
@@ -245,7 +245,7 @@ function ccSetup() {
   ccSetupDashboard_();
   ccOrderTabs_();
   ss.getSheets().forEach(function (sh) { if (sh.getName().indexOf('OLD - ') === 0) sh.hideSheet(); });
-  ccAlert_('Set up complete. Next: AUTOMATION > Mail > Import leads from old email sheet (it only reads the old sheet).');
+  ccAlert_('Set up complete.');
 }
 
 function ccFreeName_(name) {
@@ -291,7 +291,29 @@ function ccSetupBrand_(b) {
     ['Brand max per hour', '=IF(Limits!E' + lr + '="","",Limits!E' + lr + ')', 'From the Limits tab']
   ]);
   ctl.getRange(12, 1, 1, CC.MAILBOX_HEADERS.length).setValues([CC.MAILBOX_HEADERS]).setFontWeight('bold');
-  b[8].forEach(function (mailbox, i) {
+  ccWriteMailControlRows_(code, ctl);
+  ctl.getRange('I13:J60').setNumberFormat('@');
+
+  var log = ccEnsureTab_('Mail Log ' + code, CC.SEND_LOG_HEADERS, { hidden: true }).sheet;
+  log.getRange(1, 1, log.getMaxRows(), 9).setNumberFormat('@');
+}
+
+/** Every sending mailbox of a brand: the built-in list plus any added on the Mailboxes tab (menu: Add a sending mailbox). */
+function ccMailboxList_(code) {
+  var b = ccBrand_(code), out = [], seen = {};
+  var add = function (m) { m = String(m || '').trim().toLowerCase(); if (m && !seen[m]) { seen[m] = true; out.push(m); } };
+  (b ? b[8] : []).forEach(add);
+  var mb = ccSs_().getSheetByName('Mailboxes');
+  if (mb && mb.getLastRow() >= 2) mb.getRange(2, 1, mb.getLastRow() - 1, 2).getDisplayValues().forEach(function (r) {
+    if (String(r[0]).trim().toUpperCase() === code) add(r[1]);
+  });
+  return out;
+}
+
+/** Mail Control rows 13+ (read by the mail tool): mailbox + settings from the Mailboxes tab. Counters (F:J, L:M) are left alone. */
+function ccWriteMailControlRows_(code, ctl) {
+  ctl = ctl || ccSheet_('Mail Control ' + code);
+  ccMailboxList_(code).forEach(function (mailbox, i) {
     var r = 13 + i, m = 'MATCH("' + mailbox + '",Mailboxes!B:B,0)';
     ctl.getRange(r, 1).setValue(mailbox);
     ctl.getRange(r, 2, 1, 4).setFormulas([[
@@ -299,10 +321,6 @@ function ccSetupBrand_(b) {
       '=IFERROR(INDEX(Mailboxes!D:D,' + m + '),"")', '=IFERROR(INDEX(Mailboxes!E:E,' + m + '),"")']]);
     ctl.getRange(r, 11).setFormula('=IFERROR(INDEX(Mailboxes!G:G,' + m + '),"No")');
   });
-  ctl.getRange('I13:J30').setNumberFormat('@');
-
-  var log = ccEnsureTab_('Mail Log ' + code, CC.SEND_LOG_HEADERS, { hidden: true }).sheet;
-  log.getRange(1, 1, log.getMaxRows(), 9).setNumberFormat('@');
 }
 
 function ccBrandIndex_(code) {

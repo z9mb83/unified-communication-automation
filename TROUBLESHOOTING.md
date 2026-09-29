@@ -6,7 +6,12 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 ## Mail
 | Error / symptom | Fix | File |
 |---|---|---|
-| `invalid_grant`, "mailbox needs authentication repair" | Reconnect that Gmail, re-upload token bundle | `mail/authorize_gmail.py`, `mail/scripts/build_gmail_bundle.py` (steps: `mail/REPAIR.md`) |
+| `invalid_grant`, "mailbox needs authentication repair" | Cloud Shell: `bash tools/connect_gmail.sh that@gmail.com` | `mail/tools/connect_gmail.sh` |
+| New mailbox never sends | Not connected yet (`connect_gmail.sh`), or Enabled = No / paused in **Mailboxes** | `mail/tools/connect_gmail.sh`, `mail/app/limit_manager.py` (`with_sheet_mailboxes`) |
+| connect_gmail: "access blocked" / "app not verified" | Add the Gmail as **Test user**: Cloud console → APIs & Services → OAuth consent screen | — |
+| Status **Skipped – would bounce** | Lead's email domain cannot receive mail; fix the address or leave it | `mail/app/domain_check.py` |
+| Status **Bounced** + row in Do Not Contact | The report found a failed-delivery notice for that lead | `mail/reply_sheet.py` (`mark_bounced`), `mail/report_core.py` (`is_bounce`) |
+| Emails landing in spam | Warm up new mailboxes (daily 3 → raise slowly), keep bounces low, check drafts | `mail/app/email_generator.py` (brief lists, `SPAM_PHRASES`) |
 | Scheduler shows **Failed** (permission) | Grant `run.invoker` to the scheduler account | command in `mail/REPAIR.md` |
 | `No eligible mailbox` | Raise limits / un-pause in **Mailboxes** tab (normal when daily limits are used up) | `mail/app/limit_manager.py` |
 | `Brand send gap active` | **Limits** → Minimum gap | `mail/app/brand_runner.py` |
@@ -14,7 +19,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | `Emergency stop active` | **Limits** → Mail On = Yes | `common/Core.gs` (Mail Control formulas) |
 | `Outside sending hours` | **Limits** → Start / End | `mail/app/brand_runner.py` |
 | `Missing required Sheet tab(s)` | Menu **Set up / repair tabs** | `common/Core.gs` |
-| Drafts not written / OpenAI error | Check `OPENAI_API_KEY` secret | `mail/app/email_generator.py` |
+| Drafts not written / `OpenAI generation error` (401, 429, missing key) | Replace / top up the key | `mail/OPENAI_KEY.md`, `mail/app/email_generator.py` |
+| `Draft kept spam-risk wording` | Rare; retried next run. Edit word list if it repeats | `mail/app/email_generator.py` (`SPAM_PHRASES`) |
 | `Recipient suppressed` / `already contacted` | Expected; see **Do Not Contact** / Mail Log | `mail/app/suppression_manager.py`, `mail/app/duplicate_manager.py` |
 | Sheets `403` | Share sheet (Editor) with `email-sender-runner@…` | — |
 | Send-now: "Could not start the mail tool" | Approve the Google Cloud permission once; else it goes with the next scheduled run | `mail/sheet/Mail.gs` (`mlStartMailJob_`), `common/appsscript.json` |
@@ -35,8 +41,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | **AUTOMATION** menu missing | Paste into Apps Script, reload | `common/Core.gs`, `mail/sheet/Mail.gs`, `whatsapp/WhatsApp.gs`, `common/appsscript.json` (`common/README.md`) |
 | `Tab "…" is missing` | Menu **Set up / repair tabs** | `common/Core.gs` |
 | "Authorization required" | Approve once (own script) | `common/appsscript.json` |
-| Import blocked ("Mail already runs from this sheet") | By design after switch-over | `mail/sheet/Mail.gs` |
-| Duplicate rows after import | Fixed; re-run import before switch only | `mail/sheet/Mail.gs` (`mlMergeRows_`) |
+| Added mailbox missing from Mail Control | Menu **Set up / repair tabs** (rebuilds rows 13+ from Mailboxes) | `common/Core.gs` (`ccMailboxList_`, `ccWriteMailControlRows_`) |
+| "Add a sending mailbox" refuses | Message says why (unknown brand code, already a mailbox, limit 1-50) | `mail/sheet/Mail.gs` (`mlAddMailboxCore_`) |
 
 ## WhatsApp
 | Status / message | Fix | File |

@@ -14,10 +14,11 @@ from app import credential_store
 from app.approval_manager import SENDABLE_STATUSES, can_generate, is_approved_at
 from app.config_loader import BrandConfig, RuntimeConfig, approval_index, lead_range_end_column, lead_row_width, uses_legacy_lead_format
 from app.duplicate_manager import sent_recipients
+from app.domain_check import domain_problem
 from app.email_generator import generate_email
 from app.gmail_client import send_email
 from app.global_state import GlobalState
-from app.limit_manager import Mailbox, brand_cap_reason, read_mailboxes_from_rows, select_mailbox
+from app.limit_manager import Mailbox, brand_cap_reason, mailbox_range, read_mailboxes_from_rows, select_mailbox, with_sheet_mailboxes
 from app.send_logger import append_sheet_log, logger_for
 from app.sheet_client import SheetClient
 from app.suppression_manager import suppressed_recipients
@@ -92,11 +93,12 @@ class BrandRunner:
         logs = self._safe_get(sheets, f"'{self.brand.send_log_tab}'!A2:I", "Send Log", result, dry_run)
         mailbox_rows = self._safe_get(
             sheets,
-            f"'{self.brand.control_tab}'!A13:M{12 + max(len(self.brand.gmail_accounts), 1)}",
+            mailbox_range(self.brand),
             "mailbox control rows",
             result,
             dry_run,
         )
+        self.brand = with_sheet_mailboxes(self.brand, mailbox_rows)
         mailboxes = read_mailboxes_from_rows(self.brand, mailbox_rows, logs, now, self.tz, default_daily, default_hourly)
         leads = self._safe_get(sheets, self._lead_data_range(), "lead rows", result, dry_run)
         suppression_rows = self._safe_get(sheets, f"'{self.brand.suppression_tab}'!A2:C", "suppression rows", result, dry_run)
@@ -179,6 +181,14 @@ class BrandRunner:
         if not self._valid_send_time(now, start_time, end_time):
             self._write_lead_error(sheets, row_number, "Scheduled", "Outside sending hours", dry_run)
             result.skipped_reason = "Outside sending hours"
+            return result
+
+        problem = domain_problem(recipient)
+        if problem:
+            self._write_lead_error(sheets, row_number, "Skipped", f"Not sent: {problem} (would bounce)", dry_run)
+            result.skipped_reason = f"Email domain problem: {problem}"
+            if dry_run:
+                result.dry_run_notes.append(f"Would skip row {row_number}: {problem}.")
             return result
 
         mailbox = select_mailbox(self.brand, mailboxes, now, minimum_gap)

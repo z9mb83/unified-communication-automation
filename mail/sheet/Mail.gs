@@ -3,8 +3,8 @@
  *
  * The mail tool itself (AI drafts + Gmail sending) is the Cloud Run job in mail/.
  * This file only:
- *   - imports leads, send logs, mailbox limits and unsubscribes from the OLD email sheet
- *     (the old sheet is only READ; nothing in it is changed), and
+ *   - "Add a sending mailbox" (a new Gmail sender for a brand; connect it once with mail/tools/connect_gmail.sh),
+ *   - the one-time import from the OLD email sheet (kept for reference; no longer in the menu), and
  *   - shows a quick mail status, and
  *   - "Send mail to selected rows": queues the selected rows in the hidden tab "Mail Send Now" and starts the
  *     mail job right away (the job sends them first; see mail/app/send_now.py).
@@ -283,4 +283,41 @@ function mlShowSendNow() {
     var started = mlStartMailJob_();
     ccAlert_(started.ok ? 'Started. Check again in about 2 minutes.' : 'Could not start it (' + started.msg + ').');
   }
+}
+
+/* ============================== add a sending mailbox ============================== */
+
+/** Adds a Gmail sender to a brand. Returns a message; throws on invalid input. */
+function mlAddMailboxCore_(code, email, daily) {
+  code = String(code || '').trim().toUpperCase();
+  email = String(email || '').trim().toLowerCase();
+  if (!ccBrand_(code)) throw new Error('Unknown brand code "' + code + '" (use SB, 99M, 99S, PE or SC).');
+  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email)) throw new Error('"' + email + '" is not an email address.');
+  var limit = ccNumber_(daily, 3);
+  if (limit < 1 || limit > 50) throw new Error('Daily limit must be between 1 and 50 (new Gmail accounts: start with 3).');
+  var mb = ccSheet_('Mailboxes'), rows = mb.getLastRow() >= 2 ? mb.getRange(2, 1, mb.getLastRow() - 1, 2).getDisplayValues() : [];
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][1]).trim().toLowerCase() === email) throw new Error(email + ' is already a mailbox (brand ' + rows[i][0] + ').');
+  }
+  if (ccMailboxList_(code).indexOf(email) !== -1) throw new Error(email + ' is already a mailbox of ' + code + '.');
+  var r = mb.getLastRow() + 1, ref = "'Mail Control " + code + "'!", m = 'MATCH("' + email + '",' + ref + 'A:A,0)';
+  mb.getRange(r, 1, 1, 7).setValues([[code, email, 'Yes', String(limit), '1', 'Stage 1', 'No']]);
+  mb.getRange(r, 8, 1, 2).setFormulas([['=IFERROR(INDEX(' + ref + 'F:F,' + m + '),"")', '=IFERROR(INDEX(' + ref + 'M:M,' + m + '),"")']]);
+  ccWriteMailControlRows_(code);
+  return email + ' added to ' + code + ' (daily limit ' + limit + ', hourly 1, Stage 1).\n\n' +
+    'One step left - connect the Gmail once (Cloud Shell, in the unpacked mail/ folder):\n' +
+    '   bash tools/connect_gmail.sh ' + email + '\n\n' +
+    'Until then the mail tool simply skips this mailbox.';
+}
+
+function mlAddMailbox() {
+  var ui = SpreadsheetApp.getUi();
+  var a = ui.prompt('Add a sending mailbox (1/3)', 'Brand code: SB, 99M, 99S, PE or SC', ui.ButtonSet.OK_CANCEL);
+  if (a.getSelectedButton() !== ui.Button.OK) return;
+  var b = ui.prompt('Add a sending mailbox (2/3)', 'Gmail address to send from:', ui.ButtonSet.OK_CANCEL);
+  if (b.getSelectedButton() !== ui.Button.OK) return;
+  var c = ui.prompt('Add a sending mailbox (3/3)', 'Emails per day for this mailbox (new account: 3; you can change it later in the Mailboxes tab):', ui.ButtonSet.OK_CANCEL);
+  if (c.getSelectedButton() !== ui.Button.OK) return;
+  try { ccAlert_(mlAddMailboxCore_(a.getResponseText(), b.getResponseText(), c.getResponseText() || '3')); }
+  catch (e) { ccAlert_('Nothing added: ' + e.message); }
 }

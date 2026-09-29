@@ -61,3 +61,68 @@ def mark_replied(brands, replied, sheet_factory):
         except Exception as error:  # one brand failing must not stop the others or the report
             warnings.append(f"{brand.brand_name}: could not write reply status ({type(error).__name__}).")
     return marked, warnings
+
+
+# ----------------------------------------------------------------------------------------------
+# Bounces: a lead whose email came back "undeliverable" is marked Bounced (column F, only when it
+# is still "Sent") and added once to the shared Do Not Contact tab, so it is never emailed again.
+
+def bounced_leads(bounces):
+    """{(brand name, lead email): earliest bounce time}."""
+    found = {}
+    for item in bounces:
+        lead = str(item.get("lead", "")).strip().lower()
+        if not lead:
+            continue
+        key = (item["brand"], lead)
+        if key not in found or item["time"] < found[key]:
+            found[key] = item["time"]
+    return found
+
+
+def plan_bounce_updates(tab, rows, bounced, brand_name):
+    """rows = lead tab values from A3:H. Only rows whose status is exactly 'Sent' are changed."""
+    updates = []
+    for offset, raw in enumerate(rows):
+        row = list(raw) + [""] * max(0, 8 - len(raw))
+        when = bounced.get((brand_name, str(row[1]).strip().lower()))
+        if when is None or str(row[5]).strip() != "Sent":
+            continue
+        number = offset + 3
+        updates.append((f"'{tab}'!F{number}", [["Bounced"]]))
+        updates.append((f"'{tab}'!H{number}", [[f"Bounced {when.strftime('%d-%b-%Y')}: address could not receive mail"]]))
+    return updates
+
+
+def mark_bounced(brands, bounced, sheet_factory):
+    """Returns (rows marked, Do Not Contact rows added, warnings). Never raises for one brand."""
+    marked, listed, warnings, sheets, dnc_seen = 0, 0, [], {}, {}
+    for brand in brands:
+        mine = {k: v for k, v in bounced.items() if k[0] == brand.brand_name}
+        if not mine:
+            continue
+        try:
+            if brand.sheet_id not in sheets:
+                sheets[brand.sheet_id] = sheet_factory(brand.sheet_id)
+            sheet = sheets[brand.sheet_id]
+            quoted = brand.lead_tab.replace("'", "''")
+            rows = sheet.get(f"'{quoted}'!A3:H")
+            updates = plan_bounce_updates(quoted, rows, mine, brand.brand_name)
+            if updates:
+                sheet.batch_values(updates)
+                marked += len(updates) // 2
+            dnc_tab = brand.suppression_tab.replace("'", "''")
+            key = (brand.sheet_id, dnc_tab)
+            if key not in dnc_seen:
+                dnc_seen[key] = {str(r[0]).strip().lower() for r in sheet.get(f"'{dnc_tab}'!A2:A") if r}
+            new = []
+            for (_, email), when in sorted(mine.items()):
+                if email not in dnc_seen[key]:
+                    new.append([email, "Bounced", when.strftime("%Y-%m-%d %H:%M"), brand.lead_tab])
+                    dnc_seen[key].add(email)
+            if new:
+                sheet.append(f"'{dnc_tab}'!A:D", new)
+                listed += len(new)
+        except Exception as error:
+            warnings.append(f"{brand.brand_name}: could not write bounce status ({type(error).__name__}).")
+    return marked, listed, warnings

@@ -23,15 +23,14 @@ built from this folder (image = previous sender + `Dockerfile.master`). The old 
 ## Repair the sheet side
 Apps Script (Extensions > Apps Script) > file `Mail.gs` > replace everything with `sheet/Mail.gs` > Save.
 
-## Reconnect a Gmail mailbox (login expired / invalid_grant)
-On your computer, in this folder with `credentials.json` present:
-```bash
-pip install -r requirements.txt google-auth-oauthlib
-python authorize_gmail.py --brand marketing --account name@gmail.com
-python scripts/build_gmail_bundle.py --source . --out gmail_tokens_bundle.json
-gcloud secrets versions add gmail-oauth-bundle --data-file=gmail_tokens_bundle.json
-```
-Then delete `gmail_tokens_bundle.json` (it holds login tokens; never commit it).
+## Add or reconnect a Gmail mailbox (new sender, login expired, invalid_grant)
+1. New sender only: sheet menu **AUTOMATION > Mail > Add a sending mailbox** (brand, address, emails per day).
+2. Cloud Shell, in the unpacked `mail/` folder: `bash tools/connect_gmail.sh name@gmail.com`
+   - opens a Google sign-in link; sign in as that Gmail, allow, paste back the `http://localhost...` address;
+   - checks it is the right account and saves a new version of the secret `gmail-oauth-bundle` (nothing printed).
+3. If Google says "access blocked": add the address as a Test user on the OAuth consent screen and repeat.
+
+Old way (on a computer with `credentials.json`): `authorize_gmail.py` + `scripts/build_gmail_bundle.py`.
 
 ## Moving mail to the master sheet (done 28 Sep 2026 with `go_master.sh prepare|pause|switch`)
 If the schedule ever reports Failed with a permission error:

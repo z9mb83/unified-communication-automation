@@ -397,3 +397,28 @@ test('Google Drive share links become direct downloads', () => {
   assert.strictEqual(g.waDirectLink_('https://drive.google.com/uc?export=view&id=' + id), want);
   assert.strictEqual(g.waDirectLink_(' https://example.com/logo.png '), 'https://example.com/logo.png');
 });
+
+test('add a sending mailbox: Mailboxes row + Mail Control row, no duplicates, repair keeps it', () => {
+  const master = freshMaster();
+  const globals = makeGlobals({ active: master });
+  const g = load(globals);
+  g.ccSetup();
+  const ctl = master.getSheetByName('Mail Control 99M');
+  const before = ctl.getRange(13, 1, 10, 1).getValues().map(r => r[0]).filter(String);
+  ctl.getRange(13, 6).setValue('2');  // a counter written by the mail tool must survive
+  const msg = g.mlAddMailboxCore_('99m', 'NewSender@gmail.com', '4');
+  assert.ok(msg.includes('connect_gmail.sh newsender@gmail.com'));
+  const mb = master.getSheetByName('Mailboxes');
+  const last = mb.getRange(mb.getLastRow(), 1, 1, 7).getValues()[0];
+  assert.deepStrictEqual(Array.from(last), ['99M', 'newsender@gmail.com', 'Yes', '4', '1', 'Stage 1', 'No']);
+  const after = ctl.getRange(13, 1, 10, 1).getValues().map(r => r[0]).filter(String);
+  assert.deepStrictEqual(Array.from(after), [...before, 'newsender@gmail.com']);
+  assert.strictEqual(ctl.getRange(13, 6).getValue(), '2');
+  assert.throws(() => g.mlAddMailboxCore_('99S', 'newsender@gmail.com', '3'), /already a mailbox/);
+  assert.throws(() => g.mlAddMailboxCore_('XX', 'a@gmail.com', '3'), /Unknown brand/);
+  assert.throws(() => g.mlAddMailboxCore_('SB', 'not-an-email', '3'), /not an email/);
+  assert.throws(() => g.mlAddMailboxCore_('SB', 'b@gmail.com', '500'), /between 1 and 50/);
+  // Set up / repair tabs keeps the added mailbox
+  g.ccSetup();
+  assert.ok(ctl.getRange(13, 1, 10, 1).getValues().map(r => r[0]).includes('newsender@gmail.com'));
+});

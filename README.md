@@ -11,7 +11,9 @@ If a tool breaks, restore only its folder (see that folder's `REPAIR.md`).
 
 ```
 mail/        Cold email: AI drafts + Gmail sending (Cloud Run job) and the daily reports
-  sheet/Mail.gs     the mail part of the sheet script (import from the old email sheet, status)
+  sheet/Mail.gs     the mail part of the sheet script (send to selected rows, add a mailbox, status)
+  tools/connect_gmail.sh   connect a new / expired Gmail sender (Cloud Shell)
+  OPENAI_KEY.md     how to get and store the OpenAI key for AI drafts
   REPAIR.md
 whatsapp/    WhatsApp: sends each brand's approved Meta template (runs inside the sheet, free)
   WhatsApp.gs
@@ -38,12 +40,22 @@ The complete code from before this layout is on the branch `v1-before-master-she
 | **Settings** | WhatsApp live switch + test numbers, and switch-over status |
 | Mail Control XX / Mail Log XX | Hidden technical tabs used by the mail tool (settings follow the Limits tab) |
 
-Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, import, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off) · Dashboard (create access key, show feed link).
+Menu **AUTOMATION**: Set up / repair tabs · Mail (send mail to selected rows, send-now results, add a sending mailbox, status) · WhatsApp (send WhatsApp to selected rows, save token, check templates, send now, automatic on/off) · Dashboard (create access key, show feed link).
 
 **Send to selected rows** (select rows in a brand tab, then the menu item): sends right away, ignoring sending hours,
 gap and brand limits. Still respected: Mail/WhatsApp On in Limits, Do Not Contact, already sent, mailbox daily limits (mail),
 consent + test mode (WhatsApp). Mail rows with no draft get an AI draft sent without review. Mail requests are
 queued in the hidden tab "Mail Send Now" and the mail job is started at once (`mail/app/send_now.py`).
+
+**Add a sending mailbox** (menu Mail): brand code, Gmail address, emails per day (start new accounts at 3).
+It adds the row to **Mailboxes** and the brand's hidden Mail Control tab. Then connect the Gmail once in
+Cloud Shell: `bash tools/connect_gmail.sh name@gmail.com` (in the unpacked `mail/` folder). Until connected the
+mailbox is skipped. The same command fixes a mailbox whose report says `invalid_grant`.
+
+**Deliverability** (keeping mail out of spam): every AI draft is different (random opening, angle, call to action,
+length; no links, spam words or exclamation marks; personalised from Details), each lead's email domain is checked
+before sending (dead domains are skipped instead of bouncing), and bounces found by the reports are marked
+**Bounced** and added to **Do Not Contact**. OpenAI key: `mail/OPENAI_KEY.md`.
 
 ## How limits work
 - **Mail**: the sender runs every 5 minutes (10:00-17:55, Mon-Sat) and sends at most one email per brand per run,
@@ -54,8 +66,9 @@ queued in the hidden tab "Mail Send Now" and the mail job is started at once (`m
 
 ## Current status (live since 28 Sep 2026)
 - **Mail runs from this master sheet.** Cloud Run job `email-sender-master` (every 5 min, 10:00-17:55 Mon-Sat IST)
-  reads the brand tabs, Limits and Mailboxes. The old job `email-sender` is paused; the old email sheet
-  ([Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit)) is kept unchanged as a backup.
+  reads the brand tabs, Limits and Mailboxes. The old job `email-sender` is paused and the old email sheet
+  ([Zoho_Email_Automation](https://docs.google.com/spreadsheets/d/18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI/edit)) is no longer used
+  (kept unchanged as a backup; its import was removed from the menu - `mlImportFromOldSheet` still exists in `Mail.gs`).
 - Reports: 10 AM and 6 PM, each with the last 7 days of replies (brand, email, name, phone, dates) and sends by brand; 6 PM adds today + plan; to info@99marketingservices.com, read from this sheet (`mail/REPORTS.md`).
 - Emergency stop for all mail (Cloud Shell, from the unpacked `mail/` bundle): `bash go_master.sh stop`.
   Per brand: Limits tab, Mail row, On = No.
