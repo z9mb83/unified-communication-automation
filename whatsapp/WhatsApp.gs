@@ -275,6 +275,12 @@ function waHash_(s) {
   return h.toString(16);
 }
 
+/** Google Drive share links (file/d/ID/view, open?id=ID) -> direct download link; other links unchanged. */
+function waDirectLink_(url) {
+  var m = /^https:\/\/(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([\w-]{20,})/.exec(String(url || '').trim());
+  return m ? 'https://drive.google.com/uc?export=download&id=' + m[1] : String(url || '').trim();
+}
+
 /**
  * Header media for a brand as {id}: downloads the Header media URL once, uploads it to Meta and
  * caches the media id (Script Properties) for 20 days. Throws a readable error on any problem.
@@ -288,11 +294,14 @@ function waHeaderRef_(setup, token, type) {
     if (cached && cached.id && Date.now() - cached.at < WA_MEDIA_MAX_AGE_DAYS * 86400000) return { id: cached.id };
   } catch (e) { /* re-upload */ }
   var file;
-  try { file = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true }); }
+  try { file = UrlFetchApp.fetch(waDirectLink_(url), { muteHttpExceptions: true, followRedirects: true }); }
   catch (e) { throw new Error('Could not download the header ' + type + ' (' + String(e.message || e).slice(0, 120) + ')'); }
   if (file.getResponseCode() !== 200) throw new Error('Could not download the header ' + type + ' (HTTP ' + file.getResponseCode() + ')');
   var blob = file.getBlob(), mime = String(blob.getContentType() || '').split(';')[0];
-  if (type === 'image' && ['image/jpeg', 'image/png'].indexOf(mime) === -1) throw new Error('Header link is not a JPG/PNG image (' + (mime || 'unknown type') + ')');
+  if (type === 'image' && ['image/jpeg', 'image/png'].indexOf(mime) === -1) {
+    throw new Error('Header link is not a JPG/PNG image (' + (mime || 'unknown type') + ')' +
+      (mime === 'text/html' ? ' - for Google Drive, share the file as "Anyone with the link"' : ''));
+  }
   if (blob.getBytes().length > 5 * 1024 * 1024) throw new Error('Header ' + type + ' is larger than 5 MB');
   var up = UrlFetchApp.fetch('https://graph.facebook.com/' + (ccSetting_('Graph API version') || 'v26.0') + '/' + setup.phoneId + '/media', {
     method: 'post', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + token },

@@ -44,6 +44,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | `WhatsApp Setup incomplete` | Fill Phone Number ID, WABA ID, Template name | **WhatsApp Setup** tab |
 | `no access token saved` / `Access token problem` | Menu **Save access token** (new token) | `whatsapp/WhatsApp.gs` (`waSaveToken`) |
 | Template `not found` / wrong language / not `APPROVED` / `not supported` | Correct name + language; text-only header, ≤4 variables | `whatsapp/WhatsApp.gs` (`waFetchTemplate_`, `waParseTemplate_`) |
+| "Sent" but never arrives (image templates) | Meta could not fetch the image; the sheet now uploads it itself - check **Header media URL** opens the image | `whatsapp/WhatsApp.gs` (`waHeaderRef_`) |
+| `Could not download the header image` / `not a JPG/PNG` | Use a direct image link; Drive files must be shared "Anyone with the link"; other hosts must be in `urlFetchWhitelist` | `whatsapp/WhatsApp.gs` (`waDirectLink_`), `common/appsscript.json` |
 | `Var n is empty` | Set **Var n = column** or fill that column | **WhatsApp Setup** tab |
 | `Waiting (test mode)` | **Settings** → WhatsApp live sending = Yes | `common/Core.gs` |
 | `Retry` | Rate limit; resent next run | `whatsapp/WhatsApp.gs` (`waClassifyError_`) |
