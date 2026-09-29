@@ -17,7 +17,8 @@
     "https://*.googleusercontent.com/",
     "https://*.website-files.com/",
     "https://drive.google.com/",
-    "https://drive.usercontent.google.com/"
+    "https://drive.usercontent.google.com/",
+    "https://script.google.com/"
   ],
   "webapp": {
     "executeAs": "USER_DEPLOYING",

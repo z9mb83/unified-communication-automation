@@ -422,3 +422,81 @@ test('add a sending mailbox: Mailboxes row + Mail Control row, no duplicates, re
   g.ccSetup();
   assert.ok(ctl.getRange(13, 1, 10, 1).getValues().map(r => r[0]).includes('newsender@gmail.com'));
 });
+
+function metaBody({ messages = [], statuses = [], contacts = [] }) {
+  return { object: 'whatsapp_business_account', entry: [{ id: 'waba', changes: [{ field: 'messages',
+    value: { messaging_product: 'whatsapp', metadata: { phone_number_id: '1302632189604185' }, contacts, messages, statuses } }] }] };
+}
+
+test('WhatsApp webhook: parse, match lead, delivery status, replies, STOP, dedupe, key check', () => {
+  const master = freshMaster();
+  const globals = makeGlobals({ active: master });
+  const g = load(globals);
+  g.ccSetup();
+  const sh = master.getSheetByName('99M');
+  sh.getRange(3, 1, 2, 20).setValues([
+    ['Aryan', 'a@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '8168429342', 'Yes', 'Yes', 'Sent', '2026-09-28 10:00:00', 'wamid.OUT1'],
+    ['Old row', '', '', '', '', '', '', '', '', '', '', '', '', '', '+91 81684 29342', 'Yes', 'Yes', 'Sent', '2026-09-01 10:00:00', 'wamid.OLD']]);
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 1, 20).setValues([['Neha', '', '', '', '', '', '', '', '', '', '', '', '', '', '9876500000', '', '', '', '', '']]);
+  assert.strictEqual(sh.getRange(2, 22).getValue(), 'WhatsApp replied');
+  assert.ok(master.getSheetByName('WhatsApp Replies'));
+
+  // pure parts
+  const parsed = g.waParseWebhook_(metaBody({ contacts: [{ wa_id: '918168429342', profile: { name: 'Aryan K' } }],
+    messages: [{ id: 'wamid.IN1', from: '918168429342', timestamp: '1790675000', type: 'text', text: { body: 'Interested, call me' }, context: { id: 'wamid.OUT1' } }],
+    statuses: [{ id: 'wamid.OUT1', status: 'read', recipient_id: '918168429342', timestamp: '1790674000' }] }));
+  assert.strictEqual(parsed.messages[0].name, 'Aryan K');
+  assert.strictEqual(parsed.messages[0].text, 'Interested, call me');
+  assert.strictEqual(parsed.statuses[0].status, 'read');
+  assert.strictEqual(g.waDeliveryLabel_('Read', 'delivered', ''), 'Read');
+  assert.strictEqual(g.waDeliveryLabel_('Delivered', 'read', ''), 'Read');
+  assert.strictEqual(g.waDeliveryLabel_('Read', 'failed', '131049 not delivered'), 'Failed: 131049 not delivered');
+  assert.ok(g.waIsStop_(' STOP. ') && !g.waIsStop_('please stop by tomorrow'));
+  assert.strictEqual(g.waMessageText_({ type: 'button', button: { text: 'Yes, interested' } }), 'Yes, interested');
+  assert.strictEqual(g.waMessageText_({ type: 'image', image: { caption: 'our menu' } }), '[image] our menu');
+
+  // wrong key: ignored
+  const post = (key, body) => g.doPost({ parameter: { key }, postData: { contents: JSON.stringify(body) } });
+  assert.strictEqual(post('nope', metaBody({ messages: [{ id: 'x', from: '1', type: 'text', text: { body: 'hi' } }] })).text, 'ok');
+  assert.strictEqual(master.getSheetByName('WhatsApp Replies').getLastRow(), 1);
+
+  globals.__props.WA_HOOK_KEY = 'k'.repeat(64);
+  globals.__props.WA_VERIFY_TOKEN = 'verify123';
+  const key = 'k'.repeat(64);
+  // Meta verification
+  assert.strictEqual(g.doGet({ parameter: { 'hub.mode': 'subscribe', 'hub.verify_token': 'verify123', 'hub.challenge': '42', key } }).text, '42');
+  assert.strictEqual(g.doGet({ parameter: { 'hub.mode': 'subscribe', 'hub.verify_token': 'bad', 'hub.challenge': '42', key } }).text, 'forbidden');
+
+  // status + reply to our message -> row 3 (exact context), not the old row
+  post(key, metaBody({ contacts: [{ wa_id: '918168429342', profile: { name: 'Aryan K' } }],
+    statuses: [{ id: 'wamid.OUT1', status: 'delivered', recipient_id: '918168429342', timestamp: '1790674000' }],
+    messages: [{ id: 'wamid.IN1', from: '918168429342', timestamp: '1790675000', type: 'text', text: { body: 'Interested, call me' }, context: { id: 'wamid.OUT1' } }] }));
+  assert.strictEqual(sh.getRange(3, 21).getValue(), 'Delivered');
+  assert.strictEqual(sh.getRange(3, 18).getValue(), 'Sent');           // column R untouched
+  assert.strictEqual(sh.getRange(3, 22).getValue(), 'Yes');
+  assert.strictEqual(sh.getRange(3, 24).getValue(), 'Interested, call me');
+  assert.strictEqual(sh.getRange(4, 22).getValue(), '');
+  const rep = master.getSheetByName('WhatsApp Replies');
+  assert.deepStrictEqual(Array.from(rep.getRange(2, 2, 1, 7).getValues()[0]), ['99M', '3', 'Aryan', '918168429342', 'Interested, call me', 'text', 'wamid.IN1']);
+
+  // Meta re-sends the same message: no duplicate
+  post(key, metaBody({ messages: [{ id: 'wamid.IN1', from: '918168429342', timestamp: '1790675000', type: 'text', text: { body: 'Interested, call me' } }] }));
+  assert.strictEqual(rep.getLastRow(), 2);
+
+  // no context -> newest message sent to that phone; STOP -> Do Not Contact once
+  post(key, metaBody({ messages: [{ id: 'wamid.IN2', from: '918168429342', timestamp: '1790676000', type: 'text', text: { body: 'Stop' } },
+    { id: 'wamid.IN3', from: '918168429342', timestamp: '1790676100', type: 'text', text: { body: 'STOP' } }] }));
+  assert.strictEqual(sh.getRange(3, 24).getValue(), 'STOP');
+  const dnc = master.getSheetByName('Do Not Contact');
+  const dncRows = dnc.getRange(2, 1, dnc.getLastRow() - 1, 5).getValues().filter(r => r[4] === '918168429342');
+  assert.strictEqual(dncRows.length, 1);
+  assert.strictEqual(dncRows[0][1], 'WhatsApp STOP reply');
+
+  // unknown number: logged without a brand; failed delivery shows the reason
+  post(key, metaBody({ contacts: [{ wa_id: '919999999999', profile: { name: 'Stranger' } }],
+    messages: [{ id: 'wamid.IN4', from: '919999999999', timestamp: '1790677000', type: 'text', text: { body: 'hello' } }],
+    statuses: [{ id: 'wamid.OLD', status: 'failed', recipient_id: '918168429342', errors: [{ code: 131049, title: 'not delivered' }] }] }));
+  assert.deepStrictEqual(Array.from(rep.getRange(rep.getLastRow(), 2, 1, 4).getValues()[0]), ['', '', 'Stranger', '919999999999']);
+  assert.strictEqual(sh.getRange(4, 21).getValue(), 'Failed: 131049 not delivered');
+});

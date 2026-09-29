@@ -4,7 +4,7 @@
  *
  * Tabs created by "Set up / repair tabs" (never deletes data; only adds missing tabs/headers):
  *   Dashboard · SB · 99M · 99S · PE · SC · Limits · Mailboxes · WhatsApp Setup · Do Not Contact ·
- *   WhatsApp Log · Settings · (technical, hidden) Mail Control XX / Mail Log XX used by the mail tool.
+ *   WhatsApp Log · WhatsApp Replies · Settings · (technical, hidden) Mail Control XX / Mail Log XX used by the mail tool.
  */
 
 var CC = {
@@ -28,11 +28,13 @@ var CC = {
   LEAD_HEADERS: ['Person / Company', 'Email', 'Details (optional, used by AI)', 'Subject (auto)', 'Email draft (auto)',
     'Email status', 'Sent at', 'Error', 'Sent from', 'Approve email (Yes)', 'Gmail message ID', 'Follow-up',
     'Replied', 'Replied at', 'Phone', 'Send WhatsApp (Yes)', 'WhatsApp consent (Yes)', 'WhatsApp status',
-    'WhatsApp sent at', 'WhatsApp message ID / error'],
+    'WhatsApp sent at', 'WhatsApp message ID / error',
+    'WhatsApp delivery', 'WhatsApp replied', 'WhatsApp replied at', 'WhatsApp last reply'],
   COL: { NAME: 1, EMAIL: 2, STATUS: 6, APPROVE: 10, REPLIED: 13, PHONE: 15, WA_SEND: 16, WA_CONSENT: 17,
-    WA_STATUS: 18, WA_SENT_AT: 19, WA_ID: 20 },
+    WA_STATUS: 18, WA_SENT_AT: 19, WA_ID: 20, WA_DELIVERY: 21, WA_REPLIED: 22, WA_REPLIED_AT: 23, WA_REPLY: 24 },
   MAILBOX_HEADERS: ['Mailbox', 'Enabled?', 'Warm-up Stage', 'Daily Limit', 'Hourly Limit', 'Sent Today', 'Sent This Hour',
     'Clean Days', 'Last Sent At', 'Next Eligible Time', 'Paused?', 'Pause Reason', 'Last Result'],
+  WA_REPLY_HEADERS: ['Received at', 'Brand', 'Row', 'Name', 'Phone', 'Message', 'Type', 'Message ID'],
   SEND_LOG_HEADERS: ['Date and Time', 'Gmail Sender', 'Lead Email', 'Subject', 'Gmail Message ID', 'Sending Result',
     'Error Reason', 'Daily Limit', 'Warm-up Stage'],
   LIMIT_HEADERS: ['Brand', 'Channel', 'On (Yes/No)', 'Max per day', 'Max per hour', 'Minimum gap (minutes)',
@@ -105,7 +107,9 @@ function onOpen() {
       .addItem('Check templates', 'waCheckTemplates')
       .addItem('Send now (within limits)', 'waSendNow')
       .addItem('Turn automatic sending ON (every 5 min)', 'waAutoOn')
-      .addItem('Turn automatic sending OFF', 'waAutoOff'))
+      .addItem('Turn automatic sending OFF', 'waAutoOff')
+      .addSeparator()
+      .addItem('Set up reply webhook (read replies)', 'waSetupWebhook'))
     .addSubMenu(ui.createMenu('Dashboard')
       .addItem('Create access key', 'dbCreateKey')
       .addItem('Show feed link', 'dbShowLink'))
@@ -114,7 +118,14 @@ function onOpen() {
 
 /* ============================== sheet helpers ============================== */
 
-function ccSs_() { return SpreadsheetApp.getActiveSpreadsheet(); }
+function ccSs_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss) return ss;
+  // Web app calls (dashboard feed, WhatsApp reply webhook) have no active spreadsheet.
+  var id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (!id) throw new Error('SHEET_ID is not saved yet: open the sheet and run any AUTOMATION menu item once.');
+  return SpreadsheetApp.openById(id);
+}
 
 function ccSheet_(name) {
   var sh = ccSs_().getSheetByName(name);
@@ -229,6 +240,7 @@ function ccSetup() {
     was.sheet.getRange(2, 1, CC.BRANDS.length, 6).setValues(CC.BRANDS.map(function (b) { return [b[0], '', '', '', 'en', 'A']; }));
   }
   ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error'], { text: true });
+  ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
 
   // Brand tabs + technical mail tabs
   CC.BRANDS.forEach(function (b) { ccSetupBrand_(b); });
@@ -265,11 +277,14 @@ function ccSetupBrand_(b) {
   var code = b[0], ss = ccSs_();
   var sh = ss.getSheetByName(code), created = false;
   if (!sh) { sh = ss.insertSheet(code); created = true; }
+  if (sh.getMaxColumns() < CC.LEAD_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), CC.LEAD_HEADERS.length - sh.getMaxColumns());
   if (created) sh.getRange(1, 1, sh.getMaxRows(), CC.LEAD_HEADERS.length).setNumberFormat('@');
+  else sh.getRange(1, 21, sh.getMaxRows(), 4).setNumberFormat('@');  // WhatsApp delivery / reply columns (U:X)
   if (!sh.getRange('A1').getValue()) sh.getRange('A1:C1').setValues([['From', '', b[2]]]);
   sh.getRange(2, 1, 1, CC.LEAD_HEADERS.length).setValues([CC.LEAD_HEADERS]).setFontWeight('bold').setBackground('#f3f4f6');
   sh.getRange(2, 13, 1, 2).setBackground('#e8f5e9');
   sh.getRange(2, 15, 1, 6).setBackground('#e0f2f1');
+  sh.getRange(2, 21, 1, 4).setBackground('#e8f5e9');
   sh.setFrozenRows(2); sh.setFrozenColumns(1);
   ccYesNo_(sh.getRange('J3:J')); ccYesNo_(sh.getRange('P3:P')); ccYesNo_(sh.getRange('Q3:Q'));
   if (created) { sh.setColumnWidth(1, 180); sh.setColumnWidth(2, 230); sh.setColumnWidth(5, 320); sh.setColumnWidth(15, 140); }
@@ -374,7 +389,7 @@ function ccSetupDashboard_() {
 function ccOrderTabs_() {
   var ss = ccSs_();
   var order = ['Dashboard'].concat(CC.BRANDS.map(function (b) { return b[0]; }),
-    ['Limits', 'Mailboxes', 'WhatsApp Setup', 'Do Not Contact', 'WhatsApp Log', 'Settings']);
+    ['Limits', 'Mailboxes', 'WhatsApp Setup', 'Do Not Contact', 'WhatsApp Log', 'WhatsApp Replies', 'Settings']);
   order.forEach(function (name, i) {
     var sh = ss.getSheetByName(name);
     if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }

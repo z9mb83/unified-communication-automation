@@ -71,6 +71,7 @@ function makeGlobals({ active, others = {}, fetch }) {
   const props = {};
   const logs = [];
   const triggers = [];
+  const cache = {};
   return {
     SpreadsheetApp: {
       getActiveSpreadsheet: () => active,
@@ -79,7 +80,7 @@ function makeGlobals({ active, others = {}, fetch }) {
       newDataValidation: () => ({ requireValueInList() { return this; }, setAllowInvalid() { return this; }, build() { return {}; } }),
       flush: () => {}
     },
-    LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+    LockService: { getDocumentLock: () => ({ tryLock: () => true, releaseLock() {} }), getScriptLock: () => ({ tryLock: () => true, waitLock() {}, releaseLock() {} }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) },
     Utilities: { formatDate: (d, tz, fmt) => {
       const ist = new Date(d.getTime() + 330 * 60000), p = n => String(n).padStart(2, '0');
@@ -91,6 +92,8 @@ function makeGlobals({ active, others = {}, fetch }) {
     ScriptApp: { getOAuthToken: () => 'oauth-token', getProjectTriggers: () => triggers, deleteTrigger: t => triggers.splice(triggers.indexOf(t), 1),
       newTrigger: h => ({ timeBased: () => ({ everyMinutes: () => ({ create: () => triggers.push({ getHandlerFunction: () => h }) }) }) }) },
     Logger: { log: m => logs.push(m) },
+    CacheService: { getScriptCache: () => ({ get: k => cache[k] || null, put: (k, v) => { cache[k] = v; } }) },
+    ContentService: { createTextOutput: t => ({ text: t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
     __props: props, __logs: logs, __triggers: triggers
   };
 }
