@@ -8,7 +8,7 @@ const vm = require('vm');
 const { FakeSpreadsheet, makeGlobals } = require('./fake_sheets');
 
 const ROOT = path.join(__dirname, '..', '..');
-const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs'];
+const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs', 'common/Dashboard.gs'];
 
 function load(globals) {
   const ctx = vm.createContext(Object.assign({ console }, globals));
@@ -306,4 +306,45 @@ test('send WhatsApp to selected rows ignores flag/limits but keeps consent, DNC 
   g.waSendSelected();
   assert.strictEqual(sb.getRange(7, 18).getValue(), '');
   assert.ok(globals.__logs.pop().includes('test mode'));
+});
+
+test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
+  const master = freshMaster();
+  const globals = makeGlobals({ active: master });
+  const g = load(globals);
+  g.ccSetup();
+  assert.strictEqual(g.dbStamp_('2026-09-28 15:59:10'), '2026-09-28 15:59');
+  assert.strictEqual(g.dbStamp_('28-Sep-2026 16:19'), '2026-09-28 16:19');
+  assert.strictEqual(g.dbStamp_('3/9/2026 9:05'), '2026-09-03 09:05');
+  assert.strictEqual(g.dbStamp_('soon'), '');
+  assert.deepStrictEqual(Array.from(g.dbDays_('2026-03-02', 3)), ['2026-02-28', '2026-03-01', '2026-03-02']);
+  const t = master.getSheetByName('99M');
+  t.getRange(3, 1, 5, 20).setValues([
+    ['Sent+replied', 'a@x.com', '', 'S', 'B', 'Sent', '2026-09-28 11:00:00', '', 'm@g.com', 'Yes', 'id', '', 'Yes', '28-Sep-2026 16:19', '98111', '', 'Yes', 'Sent', '', ''],
+    ['Approved', 'b@x.com', '', 'S', 'B', 'Generated', '', '', '', 'Yes', '', '', '', '', '', '', '', '', '', ''],
+    ['Draft', 'c@x.com', '', 'S', 'B', 'Generated', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['New', 'd@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['Bounce', 'e@x.com', '', 'S', 'B', 'Bounced', '', '', '', 'Yes', '', '', '', '', '', '', '', 'Failed', '', '']]);
+  master.getSheetByName('Mail Log 99M').getRange(2, 1, 3, 7).setValues([
+    ['2026-09-28 11:00:00', 'm@g.com', 'a@x.com', 'S', 'id', 'Sent', ''],
+    ['2026-09-27 11:00:00', 'm@g.com', 'z@x.com', 'S', 'id2', 'Sent', ''],
+    ['2026-09-28 12:00:00', 'm@g.com', 'q@x.com', 'S', '', 'Failed', 'quota']]);
+  const snap = g.dbSnapshot_(master, new Date(Date.UTC(2026, 8, 28, 12, 0)));  // 17:30 IST
+  const m = snap.brands.find(b => b.code === '99M');
+  assert.deepStrictEqual([m.leads, m.sent, m.approved, m.drafts, m.toDraft, m.bounced, m.replied, m.sentToday, m.failedToday, m.sent7, m.waSent, m.waFailed],
+    [5, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1]);
+  assert.strictEqual(snap.daily.length, 30);
+  const last = snap.daily[29];
+  assert.strictEqual(last.date, '2026-09-28');
+  assert.strictEqual(last.mail['99M'], 1);
+  assert.strictEqual(last.replies['99M'], 1);
+  assert.strictEqual(snap.daily[28].mail['99M'], 1);
+  assert.strictEqual(snap.recentReplies[0].email, 'a@x.com');
+  assert.strictEqual(snap.recentSends[0].result, 'Failed');
+  assert.ok(snap.mailboxes.length >= 5);
+  // key check
+  assert.ok(!g.dbKeyOk_('anything'));
+  globals.__props.DASH_KEY = 'k'.repeat(64);
+  assert.ok(g.dbKeyOk_('k'.repeat(64)));
+  assert.ok(!g.dbKeyOk_('k'.repeat(63) + 'x'));
 });
