@@ -219,10 +219,17 @@ def _input(brief: dict, person_name: str, details: str, feedback: str = "") -> s
     return text
 
 
+_CLIENTS: dict = {}
+
+
 def _client(runtime: RuntimeConfig):
+    """One OpenAI client per key for the whole run (a new client per draft leaked memory in long runs)."""
     from openai import OpenAI
 
-    return OpenAI(api_key=runtime.openai_api_key)
+    key = runtime.openai_api_key
+    if key not in _CLIENTS:
+        _CLIENTS[key] = OpenAI(api_key=key)
+    return _CLIENTS[key]
 
 
 def _ask(client, runtime: RuntimeConfig, brand: BrandConfig, prompt: str) -> tuple[str, str]:

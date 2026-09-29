@@ -75,10 +75,10 @@ PY
     echo "SWITCH DONE"
     ;;
   regen-preview|regen)
-    ARGS="--regenerate-drafts"; [ "$1" = regen-preview ] && ARGS="$ARGS,--dry-run"
+    ARGS="--regenerate-drafts,--limit,120"; [ "$1" = regen-preview ] && ARGS="$ARGS,--dry-run"
     [ -n "${2:-}" ] && ARGS="$ARGS,--brand,$2"
-    # regen repeats (up to 8 rounds of ~250 drafts) until every old-format draft is rewritten.
-    for ROUND in 1 2 3 4 5 6 7 8; do
+    # regen repeats (up to 15 rounds of 120 drafts, small rounds keep memory low) until every old-format draft is rewritten.
+    for ROUND in $(seq 1 15); do
       EXEC=$(gcloud run jobs execute email-sender-master --region $R --args="$ARGS" --wait --format='value(metadata.name)')
       echo "== round $ROUND (execution $EXEC)"; sleep 20
       OUT=$(gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
