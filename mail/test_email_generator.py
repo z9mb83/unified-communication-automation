@@ -83,6 +83,13 @@ class GeneratorTest(unittest.TestCase):
         p = eg.spam_problems("Act Now", "- one\n- two\nhttps://x.com")
         self.assertTrue(any("bullet" in x for x in p) and any("link" in x for x in p) and any("spam words" in x for x in p))
 
+    def test_placeholders_are_caught(self):
+        for body in ["I'm [Name] from 99 Marketing Services.", "Hi {first_name}, quick note.", "We work in <City> too."]:
+            self.assertTrue(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
+        self.assertFalse(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", "I'm Ajay from 99 Marketing Services.")))
+        brand = type("B", (), {"brand_name": "Skyline Capital", "brand_facts": "x"})()
+        self.assertIn("I'm Ajay from Skyline Capital", eg._instructions(brand))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,6 +103,9 @@ SPAM_PHRASES = [
     "synergy", "leverage", "revolutionary", "game-changer", "game changer",
     "didn't see any details", "did not see any details", "no details", "your profile caught",
 ]
+# Template placeholders the model sometimes leaves in ("I'm [Name] from ..."): never send these.
+PLACEHOLDER = re.compile(r"\[[^\]\n]{1,40}\]|\{[^}\n]{1,40}\}|<[A-Za-z][A-Za-z _]{1,30}>")
+SENDER_FIRST_NAME = "Ajay"
 _LINK = re.compile(r"(https?://|www\.|\.com\b|\.in\b)", re.IGNORECASE)
 
 
@@ -164,6 +167,8 @@ def spam_problems(subject: str, body: str) -> list[str]:
         problems.append("spam words: " + ", ".join(found))
     if "!" in subject or body.count("!") > 0:
         problems.append("exclamation marks")
+    if PLACEHOLDER.search(body) or PLACEHOLDER.search(subject):
+        problems.append("a placeholder like [Name] - write real words or leave it out")
     if _LINK.search(body) or _LINK.search(subject):
         problems.append("a link or web address")
     if re.search(r"^\s*([-*•]|\d+[.)])\s", body, re.MULTILINE):
@@ -192,6 +197,8 @@ def _extract_json(text: str) -> dict:
 def _instructions(brand: BrandConfig) -> str:
     return (
         f"You write short, personal first-contact emails for {brand.brand_name}, one real person writing to another. "
+        f"You are {SENDER_FIRST_NAME} from {brand.brand_name}; if you introduce yourself, say \"I'm {SENDER_FIRST_NAME} from {brand.brand_name}\". "
+        "Never use placeholders or brackets such as [Name], [Company], {name} or <city>; if you do not know something, leave it out. "
         f"Approved facts about the company (use only these, never invent clients, numbers, years, awards or locations): {brand.brand_facts}\n"
         "Style rules:\n"
         "- Plain conversational English, like a note typed in Gmail. Short sentences. Two or three short paragraphs.\n"

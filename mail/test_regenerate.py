@@ -55,6 +55,8 @@ class RegenerateTest(unittest.TestCase):
         self.assertFalse(needs_regeneration(row("Generated", body=NEW)))
         self.assertFalse(needs_regeneration(row("Generated", email="")))
         self.assertFalse(needs_regeneration(row("Failed")))
+        self.assertTrue(needs_regeneration(row("Generated", body=NEW.replace("New body", "I'm [Name] from 99M"))))
+        self.assertFalse(needs_regeneration(row("Sent", body=NEW.replace("New body", "I'm [Name] from 99M"))))
 
     def test_rewrites_only_d_e_and_backs_up(self):
         rows = [row("Generated"), row("Sent"), row("Approved", body=NEW), row("Scheduled", approve="Yes")]
