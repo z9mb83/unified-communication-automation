@@ -87,6 +87,10 @@ class GeneratorTest(unittest.TestCase):
         for body in ["I'm [Name] from 99 Marketing Services.", "Hi {first_name}, quick note.", "We work in <City> too."]:
             self.assertTrue(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
         self.assertFalse(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", "I'm Ajay from 99 Marketing Services.")))
+        for body in ["I'm Alex from 99 Marketing Services.", "This is Sam at Skyline Capital.", "I'm Matt, and I help owners."]:
+            self.assertTrue(any("writer must be Ajay" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
+        for body in ["I'm Ajay from Skyline Capital.", "I'm reaching out because", "I'm writing from Mohali", "I am Ajay Veer from X."]:
+            self.assertFalse(any("writer must be" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
         brand = type("B", (), {"brand_name": "Skyline Capital", "brand_facts": "x"})()
         self.assertIn("I'm Ajay from Skyline Capital", eg._instructions(brand))
 

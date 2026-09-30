@@ -106,6 +106,8 @@ SPAM_PHRASES = [
 # Template placeholders the model sometimes leaves in ("I'm [Name] from ..."): never send these.
 PLACEHOLDER = re.compile(r"\[[^\]\n]{1,40}\]|\{[^}\n]{1,40}\}|<[A-Za-z][A-Za-z _]{1,30}>")
 SENDER_FIRST_NAME = "Ajay"
+# "I'm Alex from ..." / "This is Sam at ...": the writer introduced with a name that is not the signature's
+WRONG_INTRO = re.compile(r"\b(?:I[’']m|I am|This is|My name is)\s+(?!" + SENDER_FIRST_NAME + r"\b)([A-Z][a-z]+)\b(?:\s+[A-Z][a-z]+)?(?:\s*,|\s+(?:from|with|at|here)\b)")
 _LINK = re.compile(r"(https?://|www\.|\.com\b|\.in\b)", re.IGNORECASE)
 
 
@@ -169,6 +171,8 @@ def spam_problems(subject: str, body: str) -> list[str]:
         problems.append("exclamation marks")
     if PLACEHOLDER.search(body) or PLACEHOLDER.search(subject):
         problems.append("a placeholder like [Name] - write real words or leave it out")
+    if WRONG_INTRO.search(body):
+        problems.append(f"the writer must be {SENDER_FIRST_NAME}, not '{WRONG_INTRO.search(body).group(1)}'")
     if _LINK.search(body) or _LINK.search(subject):
         problems.append("a link or web address")
     if re.search(r"^\s*([-*•]|\d+[.)])\s", body, re.MULTILINE):

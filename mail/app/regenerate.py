@@ -5,7 +5,7 @@ Run as the sender job with one extra argument (see go_master.sh regen-preview / 
 
 Which rows: email present, status Generated / Approved / Scheduled (queued, not sent), subject and draft
 filled in, and the draft still in the OLD format (its signature has a "Website:" line - new drafts never do)
-or containing a template placeholder such as "[Name]".
+or containing a template placeholder such as "[Name]", or a made-up writer name ("I'm Alex from ...").
 Rerunning is safe: rewritten rows no longer match, so it continues where it stopped.
 
 With rewrite_since (go_master.sh regen-brand <brand>): every queued draft of that brand is rewritten, whatever
@@ -24,7 +24,7 @@ from typing import Any
 
 from app.approval_manager import SENDABLE_STATUSES
 from app.config_loader import BrandConfig, RuntimeConfig
-from app.email_generator import PLACEHOLDER, generate_email
+from app.email_generator import PLACEHOLDER, WRONG_INTRO, generate_email
 from app.utilities import is_valid_email, normalize_email_address, now_text, pad
 
 BACKUP_TAB = "Old drafts (backup)"
@@ -39,7 +39,8 @@ def needs_regeneration(row: list[Any], any_format: bool = False) -> bool:
     subject, body, status = str(row[3] or "").strip(), str(row[4] or ""), str(row[5] or "").strip()
     return bool(recipient and is_valid_email(recipient) and subject and body.strip()
                 and status in SENDABLE_STATUSES
-                and (any_format or OLD_FORMAT_MARK in body or bool(PLACEHOLDER.search(subject + "\n" + body))))
+                and (any_format or OLD_FORMAT_MARK in body or bool(PLACEHOLDER.search(subject + "\n" + body))
+                     or bool(WRONG_INTRO.search(body))))
 
 
 def _rewritten_since(sheets, tab: str, since: str) -> set[int]:
