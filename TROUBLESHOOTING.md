@@ -23,6 +23,7 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Queued drafts still in the old format (Website line, same wording) | Cloud Shell: `bash go_master.sh regen-preview`, then `bash go_master.sh regen` (only D:E change; backup tab "Old drafts (backup)") | `mail/app/regenerate.py` |
 | `Draft kept spam-risk wording` | Rare; retried next run. Edit word list if it repeats | `mail/app/email_generator.py` (`SPAM_PHRASES`) |
 | `Recipient suppressed` / `already contacted` | Expected; see **Do Not Contact** / Mail Log | `mail/app/suppression_manager.py`, `mail/app/duplicate_manager.py` |
+| `HttpError 502/503` from sheets.googleapis.com in logs | Short Google outage; reads and safe writes now retry 3 times (2 s, 5 s, 10 s). A draft that still can't be saved is left untouched and drafted again next run | `mail/app/sheet_client.py` (`execute_with_retry`), `mail/app/brand_runner.py` (`_generate_drafts`) |
 | Sheets `403` | Share sheet (Editor) with `email-sender-runner@…` | — |
 | Send-now: "Could not start the mail tool" | Approve the Google Cloud permission once; else it goes with the next scheduled run | `mail/sheet/Mail.gs` (`mlStartMailJob_`), `common/appsscript.json` |
 | Send-now row still Pending / Skipped | Menu **Show send-now results** (reason shown; can restart) | `mail/app/send_now.py` |
