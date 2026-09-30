@@ -42,3 +42,4 @@ build/
 node_modules/
 .clasp.json
 .DS_Store
+docs/build-guide*/guide.html
