@@ -128,6 +128,9 @@ def first_name(person_name: str) -> str:
     if not words:
         return ""
     name = words[0].strip(",.")
+    # a single long word ("Amarjeetmvplchd", "rajeshkumarbuilders") is a username or business handle, not a first name
+    if len(words) == 1 and len(name) > 12:
+        return ""
     if not name.isalpha() or len(name) < 2 or any(w.lower() in {"pvt", "ltd", "llp", "inc", "services", "solutions"} for w in words):
         return ""
     return name[:1].upper() + name[1:].lower() if name.isupper() or name.islower() else name

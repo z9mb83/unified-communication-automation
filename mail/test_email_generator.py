@@ -39,6 +39,9 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(eg.first_name("Mr. ARYAN Sharma"), "Aryan")
         self.assertEqual(eg.first_name("Acme Solutions Pvt Ltd"), "")
         self.assertEqual(eg.first_name(""), "")
+        self.assertEqual(eg.first_name("Amarjeetmvplchd"), "")          # handle, not a name
+        self.assertEqual(eg.first_name("Amarjeet Singh"), "Amarjeet")
+        self.assertEqual(eg.first_name("Christopher"), "Christopher")
 
     def test_briefs_vary(self):
         rng = random.Random(7)
