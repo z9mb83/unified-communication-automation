@@ -37,7 +37,8 @@ function dbDays_(today, n) {
 /** Lead rows (A:T display values, from row 3) -> pipeline counts for one brand. */
 function dbLeadStats_(rows) {
   var s = { leads: 0, withEmail: 0, toDraft: 0, drafts: 0, approved: 0, sent: 0, replied: 0, bounced: 0, failed: 0,
-    phones: 0, consent: 0, waSent: 0, waFailed: 0 };
+    phones: 0, consent: 0, waSent: 0, waFailed: 0,
+    waDelivered: 0, waRead: 0, waUndelivered: 0, waReplied: 0 };
   rows.forEach(function (r) {
     var name = String(r[0] || '').trim(), email = String(r[1] || '').trim(), phone = String(r[14] || '').trim();
     if (!name && !email && !phone) return;
@@ -56,8 +57,20 @@ function dbLeadStats_(rows) {
     var wa = String(r[17] || '').trim();
     if (wa === 'Sent') s.waSent++;
     else if (wa === 'Failed' || wa === 'Opted out' || wa === 'Uncertain') s.waFailed++;
+    // columns U:V are written by the WhatsApp reply webhook (delivery status, replied)
+    var dl = String(r[20] || '').trim();
+    if (dl === 'Read') { s.waRead++; s.waDelivered++; }
+    else if (dl === 'Delivered') s.waDelivered++;
+    else if (dl.indexOf('Failed') === 0) s.waUndelivered++;
+    if (ccYes_(r[21])) s.waReplied++;
   });
   return s;
+}
+
+/** '919876543210' -> '9198****210' (the dashboard never shows full phone numbers). */
+function dbMask_(v) {
+  var d = String(v || '').replace(/\D/g, '');
+  return d.length < 7 ? d : d.slice(0, 4) + '****' + d.slice(-3);
 }
 
 /* ============================== snapshot ============================== */
@@ -66,15 +79,15 @@ function dbSnapshot_(ss, nowDate) {
   var now = Utilities.formatDate(nowDate, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'), today = now.slice(0, 10);
   var days = dbDays_(today, DB.DAYS), first = days[0];
   var daily = {};
-  days.forEach(function (d) { daily[d] = { date: d, mail: {}, replies: {}, whatsapp: {}, failed: {} }; });
+  days.forEach(function (d) { daily[d] = { date: d, mail: {}, replies: {}, whatsapp: {}, failed: {}, waReplies: {} }; });
   var bump = function (day, kind, code) { if (daily[day]) daily[day][kind][code] = (daily[day][kind][code] || 0) + 1; };
   var read = function (name, row, width) { var sh = ss.getSheetByName(name); return sh ? mlReadDisplay_(sh, row, 1, width) : []; };
   var limits = {};
   read('Limits', 2, 8).forEach(function (r) { limits[String(r[0]).trim() + '|' + String(r[1]).trim().toLowerCase()] = ccYes_(r[2]); });
 
-  var brands = [], mailboxes = [], replies = [], sends = [];
+  var brands = [], mailboxes = [], replies = [], sends = [], waFailures = [];
   CC.BRANDS.forEach(function (b) {
-    var code = b[0], rows = read(code, 3, 20), st = dbLeadStats_(rows);
+    var code = b[0], rows = read(code, 3, 24), st = dbLeadStats_(rows);
     st.code = code; st.name = b[2];
     st.mailOn = !!limits[code + '|mail']; st.waOn = !!limits[code + '|whatsapp'];
     st.sentToday = 0; st.failedToday = 0; st.sent7 = 0; st.replies7 = 0;
@@ -85,6 +98,11 @@ function dbSnapshot_(ss, nowDate) {
       if (result === 'Sent') { bump(day, 'mail', code); if (day === today) st.sentToday++; if (day >= week) st.sent7++; }
       if (result === 'Failed') { bump(day, 'failed', code); if (day === today) st.failedToday++; }
       if (day >= first) sends.push({ time: t, brand: code, from: String(r[1]).trim(), to: String(r[2]).trim(), result: result, error: String(r[6]).slice(0, 120) });
+    });
+    rows.forEach(function (r) {
+      var dl = String(r[20] || '').trim();
+      if (dl.indexOf('Failed') === 0) waFailures.push({ time: dbStamp_(r[18]), brand: code, name: String(r[0]).trim(),
+        phone: dbMask_(r[14]), reason: dl.replace(/^Failed:\s*/, '').slice(0, 160) });
     });
     rows.forEach(function (r) {
       if (!ccYes_(r[12])) return;
@@ -107,6 +125,15 @@ function dbSnapshot_(ss, nowDate) {
     if (String(r[5]).trim() === 'Sent') bump(t.slice(0, 10), 'whatsapp', String(r[1]).trim());
     wa.push({ time: t, brand: String(r[1]).trim(), phone: String(r[3]).trim(), template: String(r[4]).trim(), result: String(r[5]).trim() });
   });
+  var waReplies = [];
+  read('WhatsApp Replies', 2, 8).forEach(function (r) {
+    var t = dbStamp_(r[0]);
+    if (!t) return;
+    var code = String(r[1]).trim();
+    if (code) bump(t.slice(0, 10), 'waReplies', code);
+    waReplies.push({ time: t, brand: code, row: String(r[2]).trim(), name: String(r[3]).trim(), phone: dbMask_(r[4]),
+      message: String(r[5]).slice(0, 300), type: String(r[6]).trim() });
+  });
   var settings = {};  // read directly: a web app has no "active" spreadsheet for ccSetting_
   read('Settings', 2, 2).forEach(function (r) { settings[String(r[0]).trim()] = String(r[1]).trim(); });
   var byTime = function (a, b) { return a.time < b.time ? 1 : a.time > b.time ? -1 : 0; };
@@ -118,6 +145,8 @@ function dbSnapshot_(ss, nowDate) {
     recentReplies: replies.sort(byTime).slice(0, DB.RECENT),
     recentSends: sends.sort(byTime).slice(0, DB.RECENT),
     recentWhatsApp: wa.sort(byTime).slice(0, DB.RECENT),
+    recentWaReplies: waReplies.sort(byTime).slice(0, 25),
+    waFailures: waFailures.sort(byTime).slice(0, DB.RECENT),
     settings: { whatsappLive: ccYes_(settings['WhatsApp live sending']), whatsappAuto: settings['Automatic WhatsApp'] || '' }
   };
 }

@@ -381,6 +381,21 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   assert.strictEqual(snap.recentReplies[0].email, 'a@x.com');
   assert.strictEqual(snap.recentSends[0].result, 'Failed');
   assert.ok(snap.mailboxes.length >= 5);
+  // WhatsApp delivery / replies (webhook columns U:X and the WhatsApp Replies tab)
+  t.getRange(3, 21, 1, 4).setValues([['Read', 'Yes', '2026-09-28 16:00:00', 'Interested']]);
+  t.getRange(7, 15).setValue('9876543210');
+  t.getRange(7, 19).setValue('2026-09-28 10:00:00');
+  t.getRange(7, 21).setValue('Failed: 131049 In order to maintain a healthy ecosystem engagement');
+  master.getSheetByName('WhatsApp Replies').getRange(2, 1, 1, 8).setValues([
+    ['2026-09-28 16:00:00', '99M', '3', 'Sent+replied', '919811122233', 'Interested', 'text', 'wamid.X']]);
+  const snap2 = g.dbSnapshot_(master, new Date(Date.UTC(2026, 8, 28, 12, 0)));
+  const m2 = snap2.brands.find(b => b.code === '99M');
+  assert.deepStrictEqual([m2.waDelivered, m2.waRead, m2.waUndelivered, m2.waReplied], [1, 1, 1, 1]);
+  assert.strictEqual(snap2.daily[29].waReplies['99M'], 1);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(snap2.recentWaReplies[0])), { time: '2026-09-28 16:00', brand: '99M', row: '3', name: 'Sent+replied',
+    phone: '9198****233', message: 'Interested', type: 'text' });
+  assert.strictEqual(snap2.waFailures[0].reason.slice(0, 6), '131049');
+  assert.strictEqual(snap2.waFailures[0].phone, '9876****210');
   // key check
   assert.ok(!g.dbKeyOk_('anything'));
   globals.__props.DASH_KEY = 'k'.repeat(64);
