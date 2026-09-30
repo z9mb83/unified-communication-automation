@@ -23,6 +23,8 @@ class Sheet:
         self.writes.append((rng, values))
 
     def get(self, rng):
+        if rng.startswith(f"'{BACKUP_TAB}'"):
+            return [v[0][:3] for _, v in self.appends] + getattr(self, "backup", [])
         if rng == "'99M'!A3:L":
             return self.rows
         n = int(rng.split("!A")[1].split(":")[0])
@@ -87,6 +89,24 @@ class RegenerateTest(unittest.TestCase):
         lines = regenerate(None, [BRAND], lambda sid: sheet, False, 1, TZ, generate=gen)
         self.assertIn("99M: rewrote 1, failed 1, still old 1", lines)
         self.assertTrue(any("kept old draft" in l for l in lines))
+
+    def test_rewrite_all_queued_for_one_brand(self):
+        rows = [row("Generated", body=NEW), row("Sent", body=NEW), row("Approved", body=NEW), row("Generated", body=OLD)]
+        sheet = Sheet(rows)
+        sheet.backup = [["2026-09-30 11:00:00", "99M", "5"]]   # rewritten BEFORE the cut-off: rewrite again
+        gen = lambda rt, b, name, details: ("new subj", NEW + " v2")
+        preview = regenerate(None, [BRAND], lambda sid: sheet, True, 100, TZ, generate=gen, rewrite_since="2026-09-30T15:40")
+        self.assertIn("99M: 3 queued draft(s) would be rewritten", preview)
+        lines = regenerate(None, [BRAND], lambda sid: sheet, False, 100, TZ, generate=gen, rewrite_since="2026-09-30T15:40")
+        self.assertIn("99M: rewrote 3, failed 0, still old 0", lines)
+        self.assertEqual(rows[1][4], NEW)                     # sent row untouched
+        self.assertEqual(rows[2][5], "Approved")              # status kept
+        # rerun with the same cut-off: rows backed up since then are skipped, so nothing is redone
+        again = regenerate(None, [BRAND], lambda sid: sheet, False, 100, TZ, generate=gen, rewrite_since="2000-01-01T00:00")
+        self.assertIn("99M: nothing to rewrite", again)
+        # the normal (old-format only) mode ignores new-format drafts
+        self.assertFalse(needs_regeneration(row("Generated", body=NEW)))
+        self.assertTrue(needs_regeneration(row("Generated", body=NEW), any_format=True))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,10 @@ Which rows: email present, status Generated / Approved / Scheduled (queued, not 
 filled in, and the draft still in the OLD format (its signature has a "Website:" line - new drafts never do).
 Rerunning is safe: rewritten rows no longer match, so it continues where it stopped.
 
+With rewrite_since (go_master.sh regen-brand <brand>): every queued draft of that brand is rewritten, whatever
+its format (used after a brand's facts or angles change). Rows already backed up at or after rewrite_since are
+skipped, so rerunning continues where it stopped.
+
 Only Subject (D) and Email draft (E) are changed. Status (F), approval (J) and everything else stay as they
 are, so approved rows are sent with the new text. Every old subject/draft is first copied to the tab
 "Old drafts (backup)".
@@ -28,12 +32,25 @@ OLD_FORMAT_MARK = "\nWebsite:"
 TIME_BUDGET_SECONDS = 22 * 60  # the sender's run lock lasts 30 minutes
 
 
-def needs_regeneration(row: list[Any]) -> bool:
+def needs_regeneration(row: list[Any], any_format: bool = False) -> bool:
     row = pad(row, 12)
     recipient, _ = normalize_email_address(row[1])
     subject, body, status = str(row[3] or "").strip(), str(row[4] or ""), str(row[5] or "").strip()
     return bool(recipient and is_valid_email(recipient) and subject and body.strip()
-                and status in SENDABLE_STATUSES and OLD_FORMAT_MARK in body)
+                and status in SENDABLE_STATUSES and (any_format or OLD_FORMAT_MARK in body))
+
+
+def _rewritten_since(sheets, tab: str, since: str) -> set[int]:
+    """Rows of this tab already backed up (= rewritten) at or after `since` ('yyyy-mm-dd HH:MM')."""
+    if BACKUP_TAB not in sheets.sheet_ids():
+        return set()
+    since = since.replace("T", " ")
+    done = set()
+    for r in sheets.get(f"'{BACKUP_TAB}'!A2:C") or []:
+        r = pad(r, 3)
+        if str(r[1]).strip() == tab and str(r[0]).strip() >= since and str(r[2]).strip().isdigit():
+            done.add(int(str(r[2]).strip()))
+    return done
 
 
 def _ensure_backup_tab(sheets) -> None:
@@ -44,7 +61,9 @@ def _ensure_backup_tab(sheets) -> None:
 
 
 def regenerate(runtime: RuntimeConfig, brands: list[BrandConfig], sheet_factory, dry_run: bool,
-               limit: int, tz, generate=generate_email, clock=time.monotonic) -> list[str]:
+               limit: int, tz, generate=generate_email, clock=time.monotonic,
+               rewrite_since: str | None = None) -> list[str]:
+    any_format = bool(rewrite_since)
     started, done, lines, sheets_by_id = clock(), 0, [], {}
     for brand in brands:
         if brand.sheet_id not in sheets_by_id:
@@ -52,9 +71,12 @@ def regenerate(runtime: RuntimeConfig, brands: list[BrandConfig], sheet_factory,
         sheets = sheets_by_id[brand.sheet_id]
         tab = brand.lead_tab
         rows = sheets.get(f"'{tab}'!A3:L")
-        todo = [(i + 3, pad(r, 12)) for i, r in enumerate(rows) if needs_regeneration(r)]
+        skip = _rewritten_since(sheets, tab, rewrite_since) if any_format else set()
+        todo = [(i + 3, pad(r, 12)) for i, r in enumerate(rows)
+                if needs_regeneration(r, any_format) and (i + 3) not in skip]
         if dry_run:
-            lines.append(f"{brand.lead_tab}: {len(todo)} queued draft(s) in the old format would be rewritten")
+            lines.append(f"{brand.lead_tab}: {len(todo)} queued draft(s)" + ("" if any_format else " in the old format")
+                         + " would be rewritten")
             if todo:
                 n, r = todo[0]
                 s, b = generate(runtime, brand, str(r[0]).strip(), str(r[2]).strip())
@@ -76,7 +98,7 @@ def regenerate(runtime: RuntimeConfig, brands: list[BrandConfig], sheet_factory,
                 continue
             # re-read the row: never overwrite a row that was sent or changed meanwhile
             current = pad((sheets.get(f"'{tab}'!A{n}:L{n}") or [[]])[0], 12)
-            if not needs_regeneration(current) or str(current[1]).strip().lower() != str(r[1]).strip().lower():
+            if not needs_regeneration(current, any_format) or str(current[1]).strip().lower() != str(r[1]).strip().lower():
                 continue
             sheets.append(f"'{BACKUP_TAB}'!A:F", [[now_text(datetime.now(tz)), tab, str(n), str(r[1]).strip(),
                                                    str(current[3]), str(current[4])]])

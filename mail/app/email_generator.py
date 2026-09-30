@@ -56,10 +56,13 @@ ANGLES = {
         "handling the coordination so they only see serious options",
     ],
     "skyline": [
-        "a quick consultation to understand their needs",
-        "saving them time with follow-ups and coordination",
-        "getting clear answers before they decide anything",
-        "having one point of contact who follows through",
+        "selling their business at a fair value through a confidential, structured process",
+        "knowing what their business is really worth before they talk to any buyer or investor",
+        "finding and evaluating the right business to buy, instead of chasing scattered listings",
+        "meeting serious, screened buyers or investors rather than time-wasting enquiries",
+        "raising growth funding with investor-ready documents such as a pitch deck and financial model",
+        "franchising or leasing out their business to grow into new cities without running every outlet",
+        "having one advisor run the deal from valuation to closing so they can keep running the business",
     ],
     "shaadi": [
         "a personal, one-to-one approach to matchmaking",

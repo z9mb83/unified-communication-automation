@@ -87,7 +87,11 @@ def main() -> None:
     parser.add_argument("--regenerate-drafts", action="store_true",
                         help="Rewrite queued (unsent) drafts that are still in the old format; sends nothing (app/regenerate.py).")
     parser.add_argument("--limit", type=int, default=250, help="With --regenerate-drafts: max drafts per run.")
+    parser.add_argument("--rewrite-since", help="With --regenerate-drafts and --brand: rewrite ALL queued drafts of the brand "
+                        "except rows already rewritten since this time ('yyyy-mm-dd HH:MM').")
     args = parser.parse_args()
+    if args.rewrite_since and not (args.regenerate_drafts and args.brand):
+        parser.error("--rewrite-since needs --regenerate-drafts and --brand")
     if args.regenerate_drafts:
         _regenerate(args)
         return
@@ -132,7 +136,8 @@ def _regenerate(args) -> None:
             print("The sender is running right now - try again in a minute.")
             return
         print("== Regenerate drafts" + (" (PREVIEW: nothing is changed or sent)" if args.dry_run else " (sends nothing)"))
-        for line in regenerate(runtime, brands, lambda sid: SheetClient(sid), args.dry_run, args.limit, tz):
+        for line in regenerate(runtime, brands, lambda sid: SheetClient(sid), args.dry_run, args.limit, tz,
+                               rewrite_since=args.rewrite_since):
             print(line)
 
 
