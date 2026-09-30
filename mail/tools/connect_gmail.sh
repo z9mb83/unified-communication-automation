@@ -29,6 +29,13 @@ python3 - "$WORK" "$EMAIL" <<'PY'
 import base64, hashlib, json, os, secrets, sys, urllib.error, urllib.parse, urllib.request
 
 work, email = sys.argv[1], sys.argv[2]
+
+def ask(prompt):
+    # stdin is this script's heredoc, so read the answer from the terminal itself
+    print(prompt, end='', flush=True)
+    with open('/dev/tty') as tty:
+        return tty.readline()
+
 SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.metadata"]
 bundle = json.load(open(os.path.join(work, "bundle.json")))
 if not isinstance(bundle, dict) or not bundle:
@@ -39,7 +46,7 @@ if not template:
 if "@" not in email:
     sys.exit(f"'{email}' is not an email address.")
 if email in bundle:
-    ans = input(f"{email} is already connected. Replace its sign-in (use this to fix invalid_grant)? [y/N] ").strip().lower()
+    ans = ask(f"{email} is already connected. Replace its sign-in (use this to fix invalid_grant)? [y/N] ").strip().lower()
     if ans != "y":
         sys.exit("Nothing changed.")
 
@@ -53,7 +60,7 @@ url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
     "state": state, "code_challenge": challenge, "code_challenge_method": "S256"})
 print("\n1) Open this link in your browser and sign in as", email + ":\n\n" + url + "\n")
 print("2) Allow both permissions. The browser then shows 'This site can't be reached' - that is expected.")
-back = input("3) Copy the full address from the browser's address bar and paste it here:\n> ").strip()
+back = ask("3) Copy the full address from the browser's address bar and paste it here:\n> ").strip()
 query = urllib.parse.parse_qs(urllib.parse.urlparse(back).query)
 if query.get("error"):
     sys.exit("Google returned: " + query["error"][0] + " - nothing changed.")
