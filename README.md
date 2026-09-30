@@ -82,6 +82,17 @@ Meta (WhatsApp → Configuration → Webhook). Code: `doPost` / `waApplyWebhook_
   approved templates (`marketing`, `staffing`, `property`, `skyline`; Shaadi Bells has none yet) are in **WhatsApp Setup**;
   the token is saved (menu). Templates have a logo image: put a Google Drive link (shared "Anyone with the link") or any
   direct image link in column L - the sheet uploads it to Meta itself. Test mode is controlled by **Settings**.
+  Since 29 Sep 2026 WhatsApp is **On for all brands** (Limits tab) and live sending is on (Settings).
+- **WhatsApp replies are live (29 Sep 2026).** The number is subscribed through the Meta app "99 Consulting Services";
+  its business-account webhook now points at this sheet's web app (menu WhatsApp -> *Check reply webhook* shows it).
+  Every message is still passed on to the previous receiver (Script Property `WA_FORWARD_URL`), so its auto-replies keep working.
+  Replies land in brand tabs U:X and the **WhatsApp Replies** tab; STOP adds the number to Do Not Contact.
+- **Email drafts (30 Sep 2026):** all queued, unsent drafts in the old format (1,099 rows, plus 113 SB rows rewritten on
+  29 Sep) were cleared at 09:59 so the sender writes new-format drafts (random brief per lead, no website line, spam check).
+  The old texts are in the hidden tab **Old drafts (backup)**. The sender drafts up to 20 rows per brand per run.
+  To rewrite drafts after a future template change: `bash go_master.sh regen-preview`, then `bash go_master.sh regen`.
+- Mailbox **linkwithmarketing@gmail.com** failed with `invalid_grant` on 26-28 Sep; reconnect it with
+  `bash tools/connect_gmail.sh linkwithmarketing@gmail.com` before relying on it (same for linkwithshaadi@gmail.com).
 - One-off tools (Cloud Shell): `mail/tools/send_one.sh <to> <name>` (single 99 Marketing email) and
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
@@ -105,6 +116,12 @@ master sheet --(read-only)--> common/Dashboard.gs web app (JSON, needs access ke
   Version: New version** (the web app keeps serving the old version until you do).
 - Vercel's free Hobby plan is officially for non-commercial use; if Vercel asks, move to Pro or to Cloudflare Pages/Netlify
   (same code).
+
+## Build guide (from scratch)
+[`docs/Outreach_Automation_Build_Guide.pdf`](docs/Outreach_Automation_Build_Guide.pdf) - 38 pages: architecture, every
+account and setting, sheet layout, code for each part, deliverability, compliance, testing, go-live, operations, lessons
+learned, and (pages 27-38) a complete Claude prompt to rebuild the system. Sources in `docs/build-guide/`
+(`python3 build.py` regenerates the PDF with Playwright/Chromium).
 
 ## Something broke?
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md): each error, its fix and the file to repair.

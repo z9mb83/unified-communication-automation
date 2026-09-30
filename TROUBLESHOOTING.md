@@ -71,6 +71,16 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Reply listed but Brand empty | Phone not found in any brand tab (column O) | `whatsapp/WhatsApp.gs` (`waMatchLead_`) |
 | Old auto-reply bot stopped | Only one webhook per Meta app; set Script Property `WA_FORWARD_URL` to the old bot's URL to keep it | `whatsapp/WhatsApp.gs` (`doPost`) |
 | Delivery column U stays empty | Status updates come only for messages sent after the webhook was switched | — |
+| Meta verified the webhook but real replies never arrive | The number is subscribed through another Meta app / override address. Menu **Check reply webhook** -> Yes | `whatsapp/WhatsApp.gs` (`waCheckWebhook`) |
+| Setup box showed a callback URL Meta could not validate | `ScriptApp.getService().getUrl()` returned a test deployment; the live URL is stored in `WAH.WEBAPP_URL` | `whatsapp/WhatsApp.gs` |
+
+## Draft rewrite / clearing
+| Error / symptom | Fix | File |
+|---|---|---|
+| `regen` round fails: "memory limit was reached" | Fixed 30 Sep (one OpenAI client per run, rounds of 120). Redeploy with `bash go_master.sh sender`, rerun `regen` (it continues) | `mail/app/email_generator.py` (`_client`), `mail/go_master.sh` |
+| `regen`: "The sender is running right now" | The 5-minute run holds the lock; `regen` waits and retries automatically | `mail/main.py` (`_regenerate`) |
+| Need new drafts fast (no rewrite) | Clear D:F of queued rows (after copying them to *Old drafts (backup)*); the sender drafts 20 per brand per run | `mail/app/brand_runner.py` (`_generate_drafts`) |
+| Upload in Cloud Shell became `name_(1).tgz` | Cloud Shell renames duplicates; extract the newest file into a fresh folder | — |
 
 ## Mail: send to selected rows
 | Status / message | Fix | File |
