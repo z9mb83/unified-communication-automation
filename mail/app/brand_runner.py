@@ -376,6 +376,19 @@ class BrandRunner:
                     continue
                 try:
                     subject, body = generate_email(self.runtime, self.brand, str(row[0]).strip(), str(row[2]).strip())
+                except Exception as error:
+                    # The AI call itself failed: show it on the row (the row is drafted again next run).
+                    try:
+                        sheets.batch_values(
+                            [
+                                (f"'{self.brand.lead_tab}'!F{offset}", [["Failed"]]),
+                                (f"'{self.brand.lead_tab}'!H{offset}", [[f"OpenAI generation error: {str(error)[:300]}"]]),
+                            ]
+                        )
+                    except Exception:
+                        pass
+                    continue
+                try:
                     sheets.batch_values(
                         [
                             (f"'{self.brand.lead_tab}'!D{offset}:F{offset}", [[subject, body, "Generated"]]),
@@ -384,12 +397,9 @@ class BrandRunner:
                     )
                     generated_count += 1
                 except Exception as error:
-                    sheets.batch_values(
-                        [
-                            (f"'{self.brand.lead_tab}'!F{offset}", [["Failed"]]),
-                            (f"'{self.brand.lead_tab}'!H{offset}", [[f"OpenAI generation error: {error}"]]),
-                        ]
-                    )
+                    # Saving to the sheet failed (e.g. a Google outage that outlasted the retries): leave the row
+                    # untouched so it is simply drafted again on the next run - never mark it Failed.
+                    result.errors.append(f"row {offset}: draft not saved ({type(error).__name__}); will retry")
         return generated_count
 
     def _first_approved_row(self, leads: list[list[Any]]) -> tuple[int, list[Any]] | None:

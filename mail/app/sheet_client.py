@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Iterable
 
 import google.auth
@@ -9,6 +10,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from app.config_loader import SHEETS_SCOPES, load_runtime_config
 
@@ -44,6 +46,29 @@ def load_sheets_credentials() -> Credentials:
         ) from error
 
 
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+RETRY_WAITS = (2, 5, 10)  # seconds between attempts (4 attempts in total)
+
+
+def execute_with_retry(request, waits=RETRY_WAITS, sleep=time.sleep):
+    """Run a Sheets API request, retrying short Google outages (429/5xx, dropped connections).
+
+    Only used for reads and for writes that are safe to repeat (update / batch value update):
+    appends are never retried, so a retry can never add a row twice.
+    """
+    for attempt in range(len(waits) + 1):
+        try:
+            return request.execute()
+        except HttpError as error:
+            status = getattr(getattr(error, "resp", None), "status", None)
+            if int(status or 0) not in RETRY_STATUSES or attempt == len(waits):
+                raise
+        except (ConnectionError, TimeoutError, OSError):
+            if attempt == len(waits):
+                raise
+        sleep(waits[attempt])
+
+
 class SheetClient:
     def __init__(self, spreadsheet_id: str, dry_run: bool = False) -> None:
         self.spreadsheet_id = spreadsheet_id
@@ -52,7 +77,7 @@ class SheetClient:
         self.service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
     def spreadsheet_metadata(self) -> dict[str, Any]:
-        return self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
+        return execute_with_retry(self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id))
 
     def sheet_ids(self) -> dict[str, int]:
         metadata = self.spreadsheet_metadata()
@@ -62,18 +87,17 @@ class SheetClient:
         }
 
     def get(self, range_name: str) -> list[list[Any]]:
-        result = (
+        result = execute_with_retry(
             self.service.spreadsheets()
             .values()
             .get(spreadsheetId=self.spreadsheet_id, range=range_name)
-            .execute()
         )
         return result.get("values", [])
 
     def update(self, range_name: str, values: list[list[Any]]) -> None:
         if self.dry_run:
             raise RuntimeError(f"dry-run blocked Sheets update to {range_name}")
-        (
+        execute_with_retry(
             self.service.spreadsheets()
             .values()
             .update(
@@ -82,7 +106,6 @@ class SheetClient:
                 valueInputOption="USER_ENTERED",
                 body={"values": values},
             )
-            .execute()
         )
 
     def batch_values(self, updates: Iterable[tuple[str, list[list[Any]]]]) -> None:
@@ -91,14 +114,13 @@ class SheetClient:
         data = [{"range": range_name, "values": values} for range_name, values in updates]
         if not data:
             return
-        (
+        execute_with_retry(
             self.service.spreadsheets()
             .values()
             .batchUpdate(
                 spreadsheetId=self.spreadsheet_id,
                 body={"valueInputOption": "USER_ENTERED", "data": data},
             )
-            .execute()
         )
 
     def append(self, range_name: str, values: list[list[Any]]) -> None:
