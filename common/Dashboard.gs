@@ -67,7 +67,7 @@ function dbLeadStats_(rows) {
   return s;
 }
 
-/** '919876543210' -> '9198****210' (the dashboard never shows full phone numbers). */
+/** '919876543210' -> '9198****210' (masked everywhere except the WhatsApp replies list). */
 function dbMask_(v) {
   var d = String(v || '').replace(/\D/g, '');
   return d.length < 7 ? d : d.slice(0, 4) + '****' + d.slice(-3);
@@ -131,7 +131,8 @@ function dbSnapshot_(ss, nowDate) {
     if (!t) return;
     var code = String(r[1]).trim();
     if (code) bump(t.slice(0, 10), 'waReplies', code);
-    waReplies.push({ time: t, brand: code, row: String(r[2]).trim(), name: String(r[3]).trim(), phone: dbMask_(r[4]),
+    waReplies.push({ time: t, brand: code, row: String(r[2]).trim(), name: String(r[3]).trim(),
+      phone: String(r[4] || '').replace(/\D/g, ''),  // full number: people who replied are leads to call back
       message: String(r[5]).slice(0, 300), type: String(r[6]).trim() });
   });
   var settings = {};  // read directly: a web app has no "active" spreadsheet for ccSetting_
