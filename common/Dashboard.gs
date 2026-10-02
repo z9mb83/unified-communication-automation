@@ -67,7 +67,7 @@ function dbLeadStats_(rows) {
   return s;
 }
 
-/** '919876543210' -> '9198****210' (masked everywhere except the WhatsApp replies and not-delivered lists). */
+/** '919876543210' -> '9198****210' (masked everywhere except the WhatsApp replies, not-delivered and read-no-reply lists). */
 function dbMask_(v) {
   var d = String(v || '').replace(/\D/g, '');
   return d.length < 7 ? d : d.slice(0, 4) + '****' + d.slice(-3);
@@ -85,7 +85,10 @@ function dbSnapshot_(ss, nowDate) {
   var limits = {};
   read('Limits', 2, 8).forEach(function (r) { limits[String(r[0]).trim() + '|' + String(r[1]).trim().toLowerCase()] = ccYes_(r[2]); });
 
-  var brands = [], mailboxes = [], replies = [], sends = [], waFailures = [];
+  var brands = [], mailboxes = [], replies = [], sends = [], waFailures = [], waReadNoReply = [];
+  // last 10 digits of every Do Not Contact phone (column E), so opted-out people never appear as "worth a call"
+  var dncPhones = {};
+  read('Do Not Contact', 2, 5).forEach(function (r) { var d = String(r[4] || '').replace(/\D/g, ''); if (d.length >= 10) dncPhones[d.slice(-10)] = true; });
   CC.BRANDS.forEach(function (b) {
     var code = b[0], rows = read(code, 3, 24), st = dbLeadStats_(rows);
     st.code = code; st.name = b[2];
@@ -103,6 +106,12 @@ function dbSnapshot_(ss, nowDate) {
       var dl = String(r[20] || '').trim();
       if (dl.indexOf('Failed') === 0) waFailures.push({ time: dbStamp_(r[18]), brand: code, name: String(r[0]).trim(),
         phone: String(r[14] || '').replace(/\D/g, ''), reason: dl.replace(/^Failed:\s*/, '').slice(0, 160) });
+    });
+    // Read the WhatsApp message (blue ticks) but no reply yet: the best people to follow up by phone
+    rows.forEach(function (r) {
+      var d = String(r[14] || '').replace(/\D/g, '');
+      if (String(r[20] || '').trim() !== 'Read' || ccYes_(r[21]) || d.length < 10 || dncPhones[d.slice(-10)]) return;
+      waReadNoReply.push({ time: dbStamp_(r[18]), brand: code, name: String(r[0]).trim(), phone: d });
     });
     rows.forEach(function (r) {
       if (!ccYes_(r[12])) return;
@@ -148,6 +157,8 @@ function dbSnapshot_(ss, nowDate) {
     recentWhatsApp: wa.sort(byTime).slice(0, DB.RECENT),
     recentWaReplies: waReplies.sort(byTime).slice(0, 25),
     waFailures: waFailures.sort(byTime).slice(0, DB.RECENT),
+    // oldest first: they have waited longest for a follow-up
+    waReadNoReply: waReadNoReply.sort(function (a, b) { return byTime(b, a); }).slice(0, 25),
     settings: { whatsappLive: ccYes_(settings['WhatsApp live sending']), whatsappAuto: settings['Automatic WhatsApp'] || '' }
   };
 }
