@@ -396,6 +396,16 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
     phone: '919811122233', message: 'Interested', type: 'text' });
   assert.strictEqual(snap2.waFailures[0].reason.slice(0, 6), '131049');
   assert.strictEqual(snap2.waFailures[0].phone, '9876543210');
+  // read, no reply yet: listed (oldest first) unless replied or in Do Not Contact
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(snap2.waReadNoReply)), []);   // row 3 read AND replied
+  t.getRange(8, 1).setValue('Quiet reader'); t.getRange(8, 15).setValue('98111 00001');
+  t.getRange(8, 19).setValue('2026-09-27 11:00:00'); t.getRange(8, 21).setValue('Read');
+  t.getRange(9, 1).setValue('Opted out'); t.getRange(9, 15).setValue('9811100002');
+  t.getRange(9, 19).setValue('2026-09-26 11:00:00'); t.getRange(9, 21).setValue('Read');
+  master.getSheetByName('Do Not Contact').getRange(2, 1, 1, 5).setValues([['', 'WhatsApp STOP', '2026-09-28', '', '919811100002']]);
+  const snap3 = g.dbSnapshot_(master, new Date(Date.UTC(2026, 8, 28, 12, 0)));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(snap3.waReadNoReply)),
+    [{ time: '2026-09-27 11:00', brand: '99M', name: 'Quiet reader', phone: '9811100001' }]);
   // key check
   assert.ok(!g.dbKeyOk_('anything'));
   globals.__props.DASH_KEY = 'k'.repeat(64);
