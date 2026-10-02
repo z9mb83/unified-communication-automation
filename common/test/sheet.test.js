@@ -395,7 +395,7 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(snap2.recentWaReplies[0])), { time: '2026-09-28 16:00', brand: '99M', row: '3', name: 'Sent+replied',
     phone: '919811122233', message: 'Interested', type: 'text' });
   assert.strictEqual(snap2.waFailures[0].reason.slice(0, 6), '131049');
-  assert.strictEqual(snap2.waFailures[0].phone, '9876****210');
+  assert.strictEqual(snap2.waFailures[0].phone, '9876543210');
   // key check
   assert.ok(!g.dbKeyOk_('anything'));
   globals.__props.DASH_KEY = 'k'.repeat(64);

@@ -67,7 +67,7 @@ function dbLeadStats_(rows) {
   return s;
 }
 
-/** '919876543210' -> '9198****210' (masked everywhere except the WhatsApp replies list). */
+/** '919876543210' -> '9198****210' (masked everywhere except the WhatsApp replies and not-delivered lists). */
 function dbMask_(v) {
   var d = String(v || '').replace(/\D/g, '');
   return d.length < 7 ? d : d.slice(0, 4) + '****' + d.slice(-3);
@@ -102,7 +102,7 @@ function dbSnapshot_(ss, nowDate) {
     rows.forEach(function (r) {
       var dl = String(r[20] || '').trim();
       if (dl.indexOf('Failed') === 0) waFailures.push({ time: dbStamp_(r[18]), brand: code, name: String(r[0]).trim(),
-        phone: dbMask_(r[14]), reason: dl.replace(/^Failed:\s*/, '').slice(0, 160) });
+        phone: String(r[14] || '').replace(/\D/g, ''), reason: dl.replace(/^Failed:\s*/, '').slice(0, 160) });
     });
     rows.forEach(function (r) {
       if (!ccYes_(r[12])) return;
