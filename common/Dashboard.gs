@@ -118,7 +118,8 @@ function dbSnapshot_(ss, nowDate) {
       var t = dbStamp_(r[13]);
       bump(t.slice(0, 10), 'replies', code);
       if (t.slice(0, 10) >= week) st.replies7++;
-      replies.push({ time: t, brand: code, name: String(r[0]).trim(), email: String(r[1]).trim(), phone: String(r[14]).trim() });
+      replies.push({ time: t, brand: code, name: String(r[0]).trim(), email: String(r[1]).trim(), phone: String(r[14]).trim(),
+        from: String(r[8] || '').trim(), subject: String(r[3] || '').trim().slice(0, 120) });  // reply from the mailbox that sent it
     });
     read('Mail Control ' + code, 13, 13).forEach(function (r) {
       if (!String(r[0]).trim()) return;

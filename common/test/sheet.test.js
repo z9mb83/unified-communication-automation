@@ -379,6 +379,8 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   assert.strictEqual(last.replies['99M'], 1);
   assert.strictEqual(snap.daily[28].mail['99M'], 1);
   assert.strictEqual(snap.recentReplies[0].email, 'a@x.com');
+  assert.strictEqual(snap.recentReplies[0].from, 'm@g.com');
+  assert.strictEqual(snap.recentReplies[0].subject, 'S');
   assert.strictEqual(snap.recentSends[0].result, 'Failed');
   assert.ok(snap.mailboxes.length >= 5);
   // WhatsApp delivery / replies (webhook columns U:X and the WhatsApp Replies tab)
