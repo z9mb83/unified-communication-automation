@@ -48,6 +48,14 @@ when the selection is over the day/hour limit, or for promotional templates outs
 Every attempt is written to the row (Y:AA) and to **SMS Log** (phone masked). The API key is removed from any
 error text before it is written.
 
+## WhatsApp + SMS together
+
+**AUTOMATION > Send WhatsApp + SMS to selected rows** checks both channels for the selected rows, shows one
+confirmation (with anything that will be skipped), sends WhatsApp and then SMS, and shows one summary.
+If one channel is not ready (not set up, Off in Limits, or nothing to send), the other still goes.
+
+Everything for a lead stays on its row: email (F:N), WhatsApp send/delivery/reply (R:X) and SMS (Y:AA).
+
 ## Going live
 
 Set **Settings > SMS live sending = Yes** only after a test SMS has arrived correctly.

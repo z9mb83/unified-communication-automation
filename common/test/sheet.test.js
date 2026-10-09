@@ -633,7 +633,7 @@ test('send SMS refuses without key/link, when OFF, and over the daily limit', ()
     ['B', 'b@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9822222222']]);
   master.setActiveSheet(sb); sb.setSelection([[3, 2]]);
   g.smsSendSelected();
-  assert.ok(globals.__logs.pop().includes('SMS API URL'));
+  { const m = globals.__logs.pop(); assert.ok(m.includes('SMS API URL'), m); }
   g.ccSetSetting_('SMS API URL', 'https://api.telinfy.example/sms?k={apikey}&to={number}&m={message}');
   g.smsSendSelected();
   assert.ok(globals.__logs.pop().includes('API key'));
@@ -646,4 +646,56 @@ test('send SMS refuses without key/link, when OFF, and over the daily limit', ()
   g.smsSendSelected();
   assert.ok(globals.__logs.pop().includes('SMS is OFF'));
   assert.strictEqual(sb.getRange(3, 25).getValue(), '');
+});
+
+test('send WhatsApp + SMS to selected rows: one confirmation, both channels written to the same row', () => {
+  const calls = [];
+  const fetch = (url, opts) => {
+    calls.push(url);
+    if (url.includes('telinfy')) return { getResponseCode: () => 200, getContentText: () => '{"status":"success","messageId":"sms1"}' };
+    const reply = url.includes('message_templates')
+      ? { data: [{ name: 'intro', language: 'en', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}' }] }] }
+      : { messages: [{ id: 'wamid.1' }] };
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+  };
+  const { master, globals, g } = smsMaster(fetch);
+  globals.__props.WA_TOKEN_ALL = 'x'.repeat(40);
+  globals.__props.SMS_API_KEY = 'secretkey123';
+  master.getSheetByName('WhatsApp Setup').getRange(2, 1, 1, 6).setValues([['SB', '111', '222', 'intro', 'en', 'A']]);
+  g.ccSetSetting_('WhatsApp live sending', 'Yes');
+  master.getSheetByName('Limits').getRange(g.ccLimits_('SB', 'WhatsApp').row, 3).setValue('Yes');
+  g.ccSetSetting_('SMS live sending', 'Yes');
+  g.ccSetSetting_('SMS API URL', 'https://api.telinfy.example/sms?k={apikey}&to={number}&m={message}');
+  master.getSheetByName('SMS Setup').getRange(2, 1, 1, 10).setValues([['SB', 'SHDBEL', '1107', 'Hi {#var#}', 'A', '', '', '', 'transactional', '']]);
+  const sb = master.getSheetByName('SB');
+  const r = Array(27).fill(''); r[0] = 'One'; r[1] = 'a@x.com'; r[14] = '9811111111'; r[16] = 'Yes';
+  sb.getRange(3, 1, 1, 27).setValues([r]);
+  master.setActiveSheet(sb); sb.setSelection([[3, 1]]);
+  g.ccSendWaSmsSelected();
+  assert.strictEqual(sb.getRange(3, 18).getValue(), 'Sent');
+  assert.strictEqual(sb.getRange(3, 25).getValue(), 'Sent');
+  assert.strictEqual(sb.getRange(3, 27).getValue(), 'sms1');
+  const msg = globals.__logs.pop();
+  assert.ok(msg.includes('WhatsApp: 1 sent') && msg.includes('SMS: 1 sent'), msg);
+  // second click: both already sent, nothing goes out
+  const before = calls.length;
+  g.ccSendWaSmsSelected();
+  assert.strictEqual(calls.length, before);
+  assert.ok(globals.__logs.pop().includes('already sent'));
+});
+
+test('send WhatsApp + SMS: a channel that is not set up is left out, the other still sends', () => {
+  const fetch = () => ({ getResponseCode: () => 200, getContentText: () => '{"status":"success","messageId":"sms9"}' });
+  const { master, globals, g } = smsMaster(fetch);
+  globals.__props.SMS_API_KEY = 'secretkey123';
+  g.ccSetSetting_('SMS live sending', 'Yes');
+  g.ccSetSetting_('SMS API URL', 'https://api.telinfy.example/sms?k={apikey}&to={number}&m={message}');
+  master.getSheetByName('SMS Setup').getRange(2, 1, 1, 10).setValues([['SB', 'SHDBEL', '1107', 'Hello', '', '', '', '', 'transactional', '']]);
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 1, 15).setValues([['One', 'a@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811111111']]);
+  master.setActiveSheet(sb); sb.setSelection([[3, 1]]);
+  g.ccSendWaSmsSelected();
+  assert.strictEqual(sb.getRange(3, 18).getValue(), '');
+  assert.strictEqual(sb.getRange(3, 25).getValue(), 'Sent');
+  assert.ok(globals.__logs.pop().includes('SMS: 1 sent'));
 });

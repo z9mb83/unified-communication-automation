@@ -165,17 +165,29 @@ function waForceCheck_(row, ctx) {
 /* ============================== menu actions ============================== */
 
 function waSendSelected() {
+  var p = waPrepareSelected_();
+  if (p.error) { ccAlert_(p.error); return; }
+  if (!ccConfirm_(p.confirm)) return;
+  ccAlert_(p.run());
+}
+
+/**
+ * Checks the selected rows of the active brand tab without sending anything.
+ * Returns {error} or {confirm: text for the confirmation, run: function () -> summary text}.
+ * Used by "Send WhatsApp to selected rows" and "Send WhatsApp + SMS to selected rows".
+ */
+function waPrepareSelected_() {
   var sh = ccSs_().getActiveSheet(), code = sh.getName();
-  if (!ccBrand_(code)) { ccAlert_('Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.'); return; }
+  if (!ccBrand_(code)) return { error: 'Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.' };
   var rows = mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
   var max = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
-  if (!rows.length) { ccAlert_('Select one or more rows (row 3 and below).'); return; }
-  if (rows.length > max) { ccAlert_('Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').'); return; }
+  if (!rows.length) return { error: 'Select one or more rows (row 3 and below).' };
+  if (rows.length > max) return { error: 'Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').' };
   var lim = ccLimits_(code, 'WhatsApp');
-  if (lim && !lim.on) { ccAlert_('WhatsApp is OFF for ' + code + ' (Limits tab, WhatsApp row, On = No). Nothing sent.'); return; }
+  if (lim && !lim.on) return { error: 'WhatsApp is OFF for ' + code + ' (Limits tab, WhatsApp row, On = No). Nothing sent.' };
   var setup = waSetup_(code), token = waToken_(code);
-  if (!setup || !setup.phoneId || !setup.waba || !setup.template) { ccAlert_(code + ': fill Phone Number ID, WABA ID and Template name in the WhatsApp Setup tab first.'); return; }
-  if (!token) { ccAlert_(code + ': no access token saved (AUTOMATION > WhatsApp > Save access token).'); return; }
+  if (!setup || !setup.phoneId || !setup.waba || !setup.template) return { error: code + ': fill Phone Number ID, WABA ID and Template name in the WhatsApp Setup tab first.' };
+  if (!token) return { error: code + ': no access token saved (AUTOMATION > WhatsApp > Save access token).' };
 
   var ctx = waContext_(), ready = [], skipped = [];
   rows.forEach(function (n) {
@@ -183,22 +195,25 @@ function waSendSelected() {
     if (check.send) ready.push({ row: n, data: row, to: check.to }); else skipped.push('Row ' + n + ': ' + check.reason);
   });
   var skipText = skipped.length ? '\n\nSkipped:\n' + skipped.slice(0, 10).join('\n') + (skipped.length > 10 ? '\n...' : '') : '';
-  if (!ready.length) { ccAlert_('Nothing to send.' + skipText); return; }
-  if (!ccConfirm_('Send WhatsApp template "' + setup.template + '" NOW to ' + ready.length + ' row(s) in ' + code + '?\n\n' +
+  if (!ready.length) return { error: 'Nothing to send.' + skipText };
+  var confirm = 'Send WhatsApp template "' + setup.template + '" NOW to ' + ready.length + ' row(s) in ' + code + '?\n\n' +
       ready.slice(0, 8).map(function (r) { return 'Row ' + r.row + ': ' + (r.data[0] || '') + ' +' + r.to; }).join('\n') +
-      (ready.length > 8 ? '\n...' : '') + '\n\nSending hours, the gap and the daily/hourly limits are ignored.' + skipText)) return;
+      (ready.length > 8 ? '\n...' : '') + '\n\nSending hours, the gap and the daily/hourly limits are ignored.' + skipText;
+  return { confirm: confirm, run: function () { return waRunSelected_(sh, code, setup, token, ready, skipText); } };
+}
 
+function waRunSelected_(sh, code, setup, token, ready, skipText) {
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) { ccAlert_('Another WhatsApp run is in progress. Try again in a minute.'); return; }
+  if (!lock.tryLock(20000)) return 'WhatsApp: another WhatsApp run is in progress. Nothing sent - try again in a minute.';
   var sent = 0, failed = [];
   try {
     var parsed;
-    try { parsed = waFetchTemplate_(setup, token); } catch (e) { ccAlert_(code + ': template problem - ' + e.message); return; }
-    if (parsed.status !== 'APPROVED') { ccAlert_(code + ': template status is ' + parsed.status + '. Nothing sent.'); return; }
-    if (!parsed.supported) { ccAlert_(code + ': template not supported - ' + parsed.reason); return; }
+    try { parsed = waFetchTemplate_(setup, token); } catch (e) { return 'WhatsApp: ' + code + ': template problem - ' + e.message; }
+    if (parsed.status !== 'APPROVED') return 'WhatsApp: ' + code + ': template status is ' + parsed.status + '. Nothing sent.';
+    if (!parsed.supported) return 'WhatsApp: ' + code + ': template not supported - ' + parsed.reason;
     var header = null;
     if (parsed.header) {
-      try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { ccAlert_(code + ': ' + e.message + '. Nothing sent.'); return; }
+      try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { return 'WhatsApp: ' + code + ': ' + e.message + '. Nothing sent.'; }
     }
     var logSheet = ccSheet_('WhatsApp Log'), logs = [];
     for (var i = 0; i < ready.length; i++) {
@@ -215,7 +230,7 @@ function waSendSelected() {
   } finally {
     lock.releaseLock();
   }
-  ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText);
+  return 'WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText;
 }
 
 function waSaveToken() {

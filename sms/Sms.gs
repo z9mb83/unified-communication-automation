@@ -177,23 +177,30 @@ function smsPost_(cfg, key, setup, to, message) {
 /* ============================== menu actions ============================== */
 
 function smsSendSelected() {
+  var p = smsPrepareSelected_();
+  if (p.error) { ccAlert_(p.error); return; }
+  if (!ccConfirm_(p.confirm)) return;
+  ccAlert_(p.run());
+}
+
+/** Same shape as waPrepareSelected_: {error} or {confirm, run() -> summary text}. Nothing is sent here. */
+function smsPrepareSelected_() {
   var sh = ccSs_().getActiveSheet(), code = sh.getName();
-  if (!ccBrand_(code)) { ccAlert_('Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.'); return; }
+  if (!ccBrand_(code)) return { error: 'Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.' };
   var rows = mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
   var max = ccNumber_(ccSetting_('Max SMS per run'), 30);
-  if (!rows.length) { ccAlert_('Select one or more rows (row 3 and below).'); return; }
-  if (rows.length > max) { ccAlert_('Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').'); return; }
+  if (!rows.length) return { error: 'Select one or more rows (row 3 and below).' };
+  if (rows.length > max) return { error: 'Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').' };
   var lim = ccLimits_(code, 'SMS');
-  if (lim && !lim.on) { ccAlert_('SMS is OFF for ' + code + ' (Limits tab, SMS row, On = No). Nothing sent.'); return; }
+  if (lim && !lim.on) return { error: 'SMS is OFF for ' + code + ' (Limits tab, SMS row, On = No). Nothing sent.' };
   var setup = smsSetup_(code), problem = smsSetupProblem_(setup), cfg = smsConfig_(), key = smsKey_();
-  if (problem) { ccAlert_(code + ': ' + problem + '. Nothing sent.'); return; }
-  if (!String(cfg.url).trim()) { ccAlert_('Paste the Telinfy send-SMS link in Settings > "SMS API URL" first.'); return; }
-  if (!key) { ccAlert_('No Telinfy API key saved (AUTOMATION > SMS > Save Telinfy API key).'); return; }
+  if (problem) return { error: code + ': ' + problem + '. Nothing sent.' };
+  if (!String(cfg.url).trim()) return { error: 'Paste the Telinfy send-SMS link in Settings > "SMS API URL" first.' };
+  if (!key) return { error: 'No Telinfy API key saved (AUTOMATION > SMS > Save Telinfy API key).' };
 
   var now = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
   if (lim && setup.route !== 'transactional' && !ccWithinWindow_(ccMinutes_(now.slice(11, 16)), lim.start, lim.end)) {
-    ccAlert_('Promotional SMS for ' + code + ' can only be sent between ' + lim.start + ' and ' + lim.end + ' (Limits tab, SMS row). Nothing sent.');
-    return;
+    return { error: 'Promotional SMS for ' + code + ' can only be sent between ' + lim.start + ' and ' + lim.end + ' (Limits tab, SMS row). Nothing sent.' };
   }
 
   var ctx = smsContext_(), ready = [], skipped = [];
@@ -204,23 +211,26 @@ function smsSendSelected() {
     catch (e) { skipped.push('Row ' + n + ': ' + e.message); }
   });
   var skipText = skipped.length ? '\n\nSkipped:\n' + skipped.slice(0, 10).join('\n') + (skipped.length > 10 ? '\n...' : '') : '';
-  if (!ready.length) { ccAlert_('Nothing to send.' + skipText); return; }
+  if (!ready.length) return { error: 'Nothing to send.' + skipText };
 
   var logSheet = ccSheet_('SMS Log');
   if (lim) {
     var left = waAllowance_(mlReadDisplay_(logSheet, 2, 1, 7), code, now, { perDay: lim.perDay, perHour: lim.perHour, gap: 0 });
     if (left.allowed < ready.length) {
-      ccAlert_(code + ': only ' + left.allowed + ' more SMS allowed right now' + (left.reason ? ' (' + left.reason + ')' : '') +
-        ' and ' + ready.length + ' are selected. Select fewer rows or raise the SMS limits in the Limits tab. Nothing sent.');
-      return;
+      return { error: code + ': only ' + left.allowed + ' more SMS allowed right now' + (left.reason ? ' (' + left.reason + ')' : '') +
+        ' and ' + ready.length + ' are selected. Select fewer rows or raise the SMS limits in the Limits tab. Nothing sent.' };
     }
   }
-  if (!ccConfirm_('Send SMS (template ' + setup.templateId + ', sender ' + setup.sender + ') NOW to ' + ready.length + ' row(s) in ' + code + '?\n\n' +
+  var confirm = 'Send SMS (template ' + setup.templateId + ', sender ' + setup.sender + ') NOW to ' + ready.length + ' row(s) in ' + code + '?\n\n' +
       ready.slice(0, 8).map(function (r) { return 'Row ' + r.row + ': ' + (r.data[0] || '') + ' +' + r.to; }).join('\n') +
-      (ready.length > 8 ? '\n...' : '') + '\n\nFirst message:\n' + ready[0].text + skipText)) return;
+      (ready.length > 8 ? '\n...' : '') + '\n\nFirst message:\n' + ready[0].text + skipText;
+  return { confirm: confirm, run: function () { return smsRunSelected_(sh, code, setup, cfg, key, ready, logSheet, skipText); } };
+}
+
+function smsRunSelected_(sh, code, setup, cfg, key, ready, logSheet, skipText) {
 
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) { ccAlert_('Another send is in progress. Try again in a minute.'); return; }
+  if (!lock.tryLock(20000)) return 'SMS: another send is in progress. Nothing sent - try again in a minute.';
   var sent = 0, failed = [], C = CC.COL;
   try {
     for (var i = 0; i < ready.length; i++) {
@@ -240,7 +250,23 @@ function smsSendSelected() {
   } finally {
     lock.releaseLock();
   }
-  ccAlert_('SMS: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText);
+  return 'SMS: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText;
+}
+
+/**
+ * One click for both channels on the same selected rows: one confirmation, WhatsApp first, then SMS, one summary.
+ * A channel that is not ready (not set up, off, nothing to send) is shown in the confirmation and left out.
+ */
+function ccSendWaSmsSelected() {
+  var wa = waPrepareSelected_(), sms = smsPrepareSelected_();
+  if (wa.error && sms.error) { ccAlert_('WhatsApp: ' + wa.error + '\n\nSMS: ' + sms.error); return; }
+  var parts = [wa.error ? 'WhatsApp will NOT be sent: ' + wa.error : wa.confirm,
+    sms.error ? 'SMS will NOT be sent: ' + sms.error : sms.confirm];
+  if (!ccConfirm_(parts.join('\n\n────────────\n\n'))) return;
+  var out = [];
+  if (!wa.error) out.push(wa.run());
+  if (!sms.error) out.push(sms.run());
+  ccAlert_(out.join('\n\n'));
 }
 
 function smsSaveKey() {

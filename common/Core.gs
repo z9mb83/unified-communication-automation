@@ -106,6 +106,7 @@ function onOpen() {
   ui.createMenu(CC.MENU)
     .addItem('Set up / repair tabs', 'ccSetup')
     .addSeparator()
+    .addItem('Send WhatsApp + SMS to selected rows', 'ccSendWaSmsSelected')
     .addSubMenu(ui.createMenu('Mail')
       .addItem('Send mail to selected rows', 'mlSendSelected')
       .addItem('Show send-now results', 'mlShowSendNow')
