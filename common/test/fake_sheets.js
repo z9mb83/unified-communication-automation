@@ -40,7 +40,9 @@ class FakeSheet {
   getLastRow() { let m = 0; for (const r in this.data) if (Object.values(this.data[r]).some(v => String(v) !== '')) m = Math.max(m, +r); return m; }
   getLastColumn() { let m = 0; for (const r in this.data) for (const c in this.data[r]) if (String(this.data[r][c]) !== '') m = Math.max(m, +c); return m; }
   getMaxRows() { return Math.max(1000, this.getLastRow()); }
-  getMaxColumns() { return 26; }
+  getMaxColumns() { return Math.max(this.maxCols || 26, this.getLastColumn()); }
+  insertColumnsAfter(after, n) { this.maxCols = this.getMaxColumns() + n; }
+  getActiveRange() { const s = (this.selection || [[3, 1]])[0]; return new FakeRange(this, s[0], 1, s[1], 1); }
   getRange(a, b, c, d) {
     if (typeof a === 'number') return new FakeRange(this, a, b, c || 1, d || 1);
     const m = /^([A-Z]+)(\d*)(?::([A-Z]+)(\d*))?$/.exec(a);

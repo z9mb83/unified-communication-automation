@@ -8,7 +8,7 @@ const vm = require('vm');
 const { FakeSpreadsheet, makeGlobals } = require('./fake_sheets');
 
 const ROOT = path.join(__dirname, '..', '..');
-const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs', 'common/Dashboard.gs'];
+const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs', 'sms/Sms.gs', 'common/Dashboard.gs'];
 
 function load(globals) {
   const ctx = vm.createContext(Object.assign({ console }, globals));
@@ -526,4 +526,124 @@ test('WhatsApp webhook: parse, match lead, delivery status, replies, STOP, dedup
     statuses: [{ id: 'wamid.OLD', status: 'failed', recipient_id: '918168429342', errors: [{ code: 131049, title: 'not delivered' }] }] }));
   assert.deepStrictEqual(Array.from(rep.getRange(rep.getLastRow(), 2, 1, 4).getValues()[0]), ['', '', 'Stranger', '919999999999']);
   assert.strictEqual(sh.getRange(4, 21).getValue(), 'Failed: 131049 not delivered');
+});
+
+/* ============================== SMS (Telinfy) ============================== */
+
+test('SMS template: fills {#var#} in order, enforces the DLT 30-character limit', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  assert.strictEqual(g.smsVarCount_('Hi {#var#}, see {#VAR#} and {# var #}'), 3);
+  assert.strictEqual(g.smsFillTemplate_('Dear {#var#}, call {#var#}', ['  Aryan  Shah ', '99999']), 'Dear Aryan Shah, call 99999');
+  assert.throws(() => g.smsFillTemplate_('Hi {#var#}', ['']), /Var 1 is empty/);
+  assert.throws(() => g.smsFillTemplate_('Hi {#var#}', ['x'.repeat(31)]), /longer than 30/);
+});
+
+test('SMS request: placeholders are encoded per place and filled only once', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  const v = { apikey: 'K&1', sender: 'LNKMKT', number: '919811111111', number10: '9811111111', message: 'Hi {sender} & co', templateid: '1107', entityid: '', route: '0' };
+  const get = g.smsBuildRequest_({ url: 'https://api.telinfy.example/sms?key={apikey}&to={number10}&msg={message}&tid={templateid}&x={unknown}' }, v);
+  assert.strictEqual(get.url, 'https://api.telinfy.example/sms?key=K%261&to=9811111111&msg=Hi%20%7Bsender%7D%20%26%20co&tid=1107&x={unknown}');
+  assert.strictEqual(get.options.method, 'get');
+  const post = g.smsBuildRequest_({ url: 'https://api.telinfy.example/sms', method: 'post',
+    body: '{"to":"{number}","text":"{message}","sender":"{sender}"}', header: 'Authorization: Bearer {apikey}' }, Object.assign({}, v, { message: 'He said "hi"' }));
+  assert.deepStrictEqual(JSON.parse(post.options.payload), { to: '919811111111', text: 'He said "hi"', sender: 'LNKMKT' });
+  assert.strictEqual(post.options.contentType, 'application/json');
+  assert.strictEqual(post.options.headers.Authorization, 'Bearer K&1');
+  assert.throws(() => g.smsBuildRequest_({ url: 'api.telinfy/sms' }, v), /full http/);
+});
+
+test('SMS reply parsing: success, failures, retry, key never kept', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  assert.deepStrictEqual([g.smsParseResult_(200, '{"status":"success","data":{"messageId":"abc"}}', '', 'KEY')].map(r => [r.status, r.id]), [['Sent', 'abc']]);
+  assert.strictEqual(g.smsParseResult_(200, '{"status":"error","message":"Invalid template KEY"}', '', 'KEY').status, 'Failed');
+  assert.ok(!g.smsParseResult_(200, '{"status":"error","message":"Invalid template KEY"}', '', 'KEY').message.includes('KEY'));
+  assert.strictEqual(g.smsParseResult_(200, 'Message submitted. Job 77', 'submitted', '').status, 'Sent');
+  assert.strictEqual(g.smsParseResult_(200, 'queued', 'submitted', '').status, 'Failed');
+  assert.strictEqual(g.smsParseResult_(200, 'ERROR: invalid sender', '', '').status, 'Failed');
+  const busy = g.smsParseResult_(503, 'down', '', '');
+  assert.ok(busy.status === 'Retry' && busy.stop);
+  assert.ok(g.smsParseResult_(401, 'bad key', '', '').stop);
+});
+
+function smsMaster(fetch) {
+  const master = new FakeSpreadsheet();
+  master.insertSheet('Start');
+  const globals = makeGlobals({ active: master, fetch });
+  const g = load(globals);
+  g.ccSetup();
+  return { master, globals, g };
+}
+
+test('setup adds SMS tabs, Settings rows, Limits SMS rows and brand columns Y:AA without touching data', () => {
+  const { master, g } = smsMaster();
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 1, 2).setValues([['Keep me', 'k@x.com']]);
+  const lim = master.getSheetByName('Limits');
+  const smsRow = g.ccLimits_('SB', 'SMS');
+  lim.getRange(smsRow.row, 4).setValue('7');               // user edit must survive a re-run
+  g.ccSetup();
+  assert.deepStrictEqual(sb.getRange(2, 25, 1, 3).getValues()[0], ['SMS status', 'SMS sent at', 'SMS ID / error']);
+  assert.strictEqual(sb.getRange(3, 1).getValue(), 'Keep me');
+  assert.strictEqual(g.ccLimits_('SB', 'SMS').perDay, 7);
+  assert.strictEqual(lim.getDataRange().getValues().filter(r => r[1] === 'SMS').length, 5);
+  assert.strictEqual(master.getSheetByName('SMS Setup').getDataRange().getValues().length, 6);
+  assert.ok(master.getSheetByName('SMS Log'));
+  assert.strictEqual(g.ccSetting_('SMS live sending'), 'No');
+});
+
+test('send SMS to selected rows: DNC, already sent, test mode, missing var; writes status + masked log', () => {
+  const calls = [];
+  const fetch = (url, opts) => { calls.push({ url, opts }); return { getResponseCode: () => 200, getContentText: () => '{"status":"success","messageId":"m' + calls.length + '"}' }; };
+  const { master, globals, g } = smsMaster(fetch);
+  globals.__props.SMS_API_KEY = 'secretkey123';
+  g.ccSetSetting_('SMS API URL', 'https://api.telinfy.example/sms?apikey={apikey}&sender={sender}&to={number}&msg={message}&templateid={templateid}');
+  g.ccSetSetting_('SMS test numbers', '9811111111');
+  master.getSheetByName('SMS Setup').getRange(2, 1, 1, 10).setValues([['SB', 'SHDBEL', '1107000000000001', 'Hi {#var#}, your wedding planner is ready.', 'A', '', '', '', 'transactional', '']]);
+  const sb = master.getSheetByName('SB');
+  const row = (name, email, phone, status) => { const r = Array(27).fill(''); r[0] = name; r[1] = email; r[14] = phone; r[24] = status || ''; return r; };
+  sb.getRange(3, 1, 5, 27).setValues([
+    row('One', 'a@x.com', '9811111111'),
+    row('Two', 'b@x.com', '9822222222'),
+    row('Done', 'c@x.com', '9811111111', 'Sent'),
+    row('Blocked', 'd@x.com', '9833333333'),
+    row('', 'e@x.com', '9811111111')]);
+  master.getSheetByName('Do Not Contact').getRange(2, 1, 1, 5).setValues([['', 'asked', '', 'SB', '9833333333']]);
+  master.setActiveSheet(sb);
+  sb.setSelection([[3, 5]]);
+  g.smsSendSelected();
+  assert.deepStrictEqual(sb.getRange(3, 25, 5, 1).getValues().map(r => r[0]), ['Sent', '', 'Sent', '', '']);
+  assert.strictEqual(sb.getRange(3, 27).getValue(), 'm1');
+  assert.strictEqual(calls.length, 1);
+  assert.ok(calls[0].url.includes('to=919811111111') && calls[0].url.includes('msg=Hi%20One%2C%20your'));
+  const msg = globals.__logs.pop();
+  assert.ok(msg.includes('1 sent') && msg.includes('test mode') && msg.includes('already sent') && msg.includes('Do Not Contact') && msg.includes('Var 1 is empty'), msg);
+  const log = master.getSheetByName('SMS Log').getDataRange().getValues();
+  assert.strictEqual(log.length, 2);
+  assert.strictEqual(log[1][3], '9198****111');
+  assert.ok(!JSON.stringify(log).includes('secretkey123'));
+});
+
+test('send SMS refuses without key/link, when OFF, and over the daily limit', () => {
+  const fetch = () => { throw new Error('must not be called'); };
+  const { master, globals, g } = smsMaster(fetch);
+  master.getSheetByName('SMS Setup').getRange(2, 1, 1, 10).setValues([['SB', 'SHDBEL', '1107', 'Hello there', '', '', '', '', 'transactional', '']]);
+  g.ccSetSetting_('SMS live sending', 'Yes');
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 2, 15).setValues([['A', 'a@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811111111'],
+    ['B', 'b@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9822222222']]);
+  master.setActiveSheet(sb); sb.setSelection([[3, 2]]);
+  g.smsSendSelected();
+  assert.ok(globals.__logs.pop().includes('SMS API URL'));
+  g.ccSetSetting_('SMS API URL', 'https://api.telinfy.example/sms?k={apikey}&to={number}&m={message}');
+  g.smsSendSelected();
+  assert.ok(globals.__logs.pop().includes('API key'));
+  globals.__props.SMS_API_KEY = 'secretkey123';
+  const lim = master.getSheetByName('Limits'), r = g.ccLimits_('SB', 'SMS').row;
+  lim.getRange(r, 4).setValue('1');
+  g.smsSendSelected();
+  assert.ok(globals.__logs.pop().includes('only 1 more SMS'));
+  lim.getRange(r, 3).setValue('No');
+  g.smsSendSelected();
+  assert.ok(globals.__logs.pop().includes('SMS is OFF'));
+  assert.strictEqual(sb.getRange(3, 25).getValue(), '');
 });

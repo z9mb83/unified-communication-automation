@@ -1,10 +1,10 @@
 /**
  * AUTOMATION CONTROL CENTER — shared setup (menu, tabs, dashboard, limits).
- * Repo: common/Core.gs   (mail/sheet/Mail.gs and whatsapp/WhatsApp.gs live in the same Apps Script project)
+ * Repo: common/Core.gs   (mail/sheet/Mail.gs, whatsapp/WhatsApp.gs and sms/Sms.gs live in the same Apps Script project)
  *
  * Tabs created by "Set up / repair tabs" (never deletes data; only adds missing tabs/headers):
  *   Dashboard · SB · 99M · 99S · PE · SC · Limits · Mailboxes · WhatsApp Setup · Do Not Contact ·
- *   WhatsApp Log · WhatsApp Replies · Settings · (technical, hidden) Mail Control XX / Mail Log XX used by the mail tool.
+ *   WhatsApp Log · WhatsApp Replies · SMS Setup · SMS Log · Settings · (technical, hidden) Mail Control XX / Mail Log XX used by the mail tool.
  */
 
 var CC = {
@@ -29,14 +29,18 @@ var CC = {
     'Email status', 'Sent at', 'Error', 'Sent from', 'Approve email (Yes)', 'Gmail message ID', 'Follow-up',
     'Replied', 'Replied at', 'Phone', 'Send WhatsApp (Yes)', 'WhatsApp consent (Yes)', 'WhatsApp status',
     'WhatsApp sent at', 'WhatsApp message ID / error',
-    'WhatsApp delivery', 'WhatsApp replied', 'WhatsApp replied at', 'WhatsApp last reply'],
+    'WhatsApp delivery', 'WhatsApp replied', 'WhatsApp replied at', 'WhatsApp last reply',
+    'SMS status', 'SMS sent at', 'SMS ID / error'],
   COL: { NAME: 1, EMAIL: 2, STATUS: 6, APPROVE: 10, REPLIED: 13, PHONE: 15, WA_SEND: 16, WA_CONSENT: 17,
-    WA_STATUS: 18, WA_SENT_AT: 19, WA_ID: 20, WA_DELIVERY: 21, WA_REPLIED: 22, WA_REPLIED_AT: 23, WA_REPLY: 24 },
+    WA_STATUS: 18, WA_SENT_AT: 19, WA_ID: 20, WA_DELIVERY: 21, WA_REPLIED: 22, WA_REPLIED_AT: 23, WA_REPLY: 24,
+    SMS_STATUS: 25, SMS_SENT_AT: 26, SMS_ID: 27 },
   MAILBOX_HEADERS: ['Mailbox', 'Enabled?', 'Warm-up Stage', 'Daily Limit', 'Hourly Limit', 'Sent Today', 'Sent This Hour',
     'Clean Days', 'Last Sent At', 'Next Eligible Time', 'Paused?', 'Pause Reason', 'Last Result'],
   WA_REPLY_HEADERS: ['Received at', 'Brand', 'Row', 'Name', 'Phone', 'Message', 'Type', 'Message ID'],
   SEND_LOG_HEADERS: ['Date and Time', 'Gmail Sender', 'Lead Email', 'Subject', 'Gmail Message ID', 'Sending Result',
     'Error Reason', 'Daily Limit', 'Warm-up Stage'],
+  SMS_SETUP_HEADERS: ['Brand', 'Sender ID (header)', 'DLT Template ID', 'Approved template text (with {#var#})',
+    'Var 1 = column', 'Var 2 = column', 'Var 3 = column', 'Var 4 = column', 'Route (promotional / transactional)', 'Entity ID (optional)'],
   LIMIT_HEADERS: ['Brand', 'Channel', 'On (Yes/No)', 'Max per day', 'Max per hour', 'Minimum gap (minutes)',
     'Start (HH:MM)', 'End (HH:MM)', 'Notes'],
   SETTINGS: [
@@ -48,7 +52,15 @@ var CC = {
     ['Old email sheet ID', '18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI', 'Only read by "Import from old email sheet"'],
     ['Mail switched to this sheet', 'No', 'Set to Yes by the switch-over. When Yes, importing from the old sheet is blocked.'],
     ['Last import', '', 'Updated automatically'],
-    ['Automatic WhatsApp', 'Off', 'Updated by the WhatsApp menu']
+    ['Automatic WhatsApp', 'Off', 'Updated by the WhatsApp menu'],
+    ['SMS live sending', 'No', 'No = only the SMS test numbers below receive SMS. Change to Yes to go live.'],
+    ['SMS test numbers', '', 'Comma separated, e.g. 919876543210'],
+    ['SMS API URL', '', 'Telinfy send-SMS link from your Telinfy panel, with {apikey} {sender} {number} {number10} {message} {templateid} {entityid} {route} where the values go'],
+    ['SMS method', 'GET', 'GET (values in the link) or POST (values in the SMS POST body below)'],
+    ['SMS POST body', '', 'Only for POST: JSON or form text with the same {placeholders}'],
+    ['SMS auth header', '', 'Optional, e.g. Authorization: Bearer {apikey} (when the key goes in a header instead of the link)'],
+    ['SMS success text', '', 'Optional: text that Telinfy puts in a successful reply (e.g. success). Blank = any HTTP 200 counts as sent'],
+    ['Max SMS per run', '30', 'Rows per "Send SMS to selected rows"']
   ]
 };
 
@@ -111,6 +123,12 @@ function onOpen() {
       .addSeparator()
       .addItem('Set up reply webhook (read replies)', 'waSetupWebhook')
       .addItem('Check reply webhook', 'waCheckWebhook'))
+    .addSubMenu(ui.createMenu('SMS')
+      .addItem('Send SMS to selected rows', 'smsSendSelected')
+      .addSeparator()
+      .addItem('Save Telinfy API key', 'smsSaveKey')
+      .addItem('Check SMS setup', 'smsCheckSetup')
+      .addItem('Send a test SMS', 'smsSendTest'))
     .addSubMenu(ui.createMenu('Dashboard')
       .addItem('Create access key', 'dbCreateKey')
       .addItem('Show feed link', 'dbShowLink'))
@@ -214,6 +232,11 @@ function ccSetup() {
     CC.BRANDS.forEach(function (b) { rows.push([b[0], 'WhatsApp', 'No', '50', '10', '2', '10:00', '19:00', 'Meta also limits new numbers (about 250 new contacts/day)']); });
     lim.sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
+  // SMS rows are added to an existing Limits tab when missing (existing rows are never changed).
+  var limHave = lim.sheet.getDataRange().getDisplayValues().map(function (r) { return String(r[0]).trim() + '|' + String(r[1]).trim().toLowerCase(); });
+  var smsRows = CC.BRANDS.filter(function (b) { return limHave.indexOf(b[0] + '|sms') === -1; })
+    .map(function (b) { return [b[0], 'SMS', 'Yes', '100', '', '', '10:00', '21:00', 'Promotional SMS may only go 10:00-21:00 (TRAI)']; });
+  if (smsRows.length) lim.sheet.getRange(lim.sheet.getLastRow() + 1, 1, smsRows.length, smsRows[0].length).setValues(smsRows);
   lim.sheet.getRange('G:H').setNumberFormat('@');
   ccYesNo_(lim.sheet.getRange('C2:C'));
   lim.sheet.setColumnWidths(1, 9, 150);
@@ -242,6 +265,15 @@ function ccSetup() {
   }
   ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error'], { text: true });
   ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
+
+  // SMS setup + log (DLT: one approved template per brand)
+  var sms = ccEnsureTab_('SMS Setup', CC.SMS_SETUP_HEADERS, { text: true });
+  var smsHave = sms.sheet.getDataRange().getDisplayValues().map(function (r) { return String(r[0]).trim(); });
+  var smsNew = CC.BRANDS.filter(function (b) { return smsHave.indexOf(b[0]) === -1; })
+    .map(function (b) { return [b[0], '', '', '', 'A', '', '', '', 'promotional', '']; });
+  if (smsNew.length) sms.sheet.getRange(sms.sheet.getLastRow() + 1, 1, smsNew.length, smsNew[0].length).setValues(smsNew);
+  sms.sheet.setColumnWidth(4, 420);
+  ccEnsureTab_('SMS Log', ['Time', 'Brand', 'Row', 'Phone', 'Template ID', 'Result', 'Message ID / Error'], { text: true });
 
   // Brand tabs + technical mail tabs
   CC.BRANDS.forEach(function (b) { ccSetupBrand_(b); });
@@ -280,12 +312,13 @@ function ccSetupBrand_(b) {
   if (!sh) { sh = ss.insertSheet(code); created = true; }
   if (sh.getMaxColumns() < CC.LEAD_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), CC.LEAD_HEADERS.length - sh.getMaxColumns());
   if (created) sh.getRange(1, 1, sh.getMaxRows(), CC.LEAD_HEADERS.length).setNumberFormat('@');
-  else sh.getRange(1, 21, sh.getMaxRows(), 4).setNumberFormat('@');  // WhatsApp delivery / reply columns (U:X)
+  else sh.getRange(1, 21, sh.getMaxRows(), 7).setNumberFormat('@');  // WhatsApp delivery / reply (U:X) + SMS (Y:AA)
   if (!sh.getRange('A1').getValue()) sh.getRange('A1:C1').setValues([['From', '', b[2]]]);
   sh.getRange(2, 1, 1, CC.LEAD_HEADERS.length).setValues([CC.LEAD_HEADERS]).setFontWeight('bold').setBackground('#f3f4f6');
   sh.getRange(2, 13, 1, 2).setBackground('#e8f5e9');
   sh.getRange(2, 15, 1, 6).setBackground('#e0f2f1');
   sh.getRange(2, 21, 1, 4).setBackground('#e8f5e9');
+  sh.getRange(2, 25, 1, 3).setBackground('#fff8e1');
   sh.setFrozenRows(2); sh.setFrozenColumns(1);
   ccYesNo_(sh.getRange('J3:J')); ccYesNo_(sh.getRange('P3:P')); ccYesNo_(sh.getRange('Q3:Q'));
   if (created) { sh.setColumnWidth(1, 180); sh.setColumnWidth(2, 230); sh.setColumnWidth(5, 320); sh.setColumnWidth(15, 140); }
@@ -390,7 +423,8 @@ function ccSetupDashboard_() {
 function ccOrderTabs_() {
   var ss = ccSs_();
   var order = ['Dashboard'].concat(CC.BRANDS.map(function (b) { return b[0]; }),
-    ['Limits', 'Mailboxes', 'WhatsApp Setup', 'Do Not Contact', 'WhatsApp Log', 'WhatsApp Replies', 'Settings']);
+    ['Limits', 'Mailboxes', 'WhatsApp Setup', 'Do Not Contact', 'WhatsApp Log', 'WhatsApp Replies',
+      'SMS Setup', 'SMS Log', 'Settings']);
   order.forEach(function (name, i) {
     var sh = ss.getSheetByName(name);
     if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
