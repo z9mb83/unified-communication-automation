@@ -18,7 +18,7 @@ mail/        Cold email: AI drafts + Gmail sending (Cloud Run job) and the daily
 whatsapp/    WhatsApp: sends each brand's approved Meta template (runs inside the sheet, free)
   WhatsApp.gs
   REPAIR.md
-sms/         Placeholder: no SMS provider chosen yet
+sms/         SMS via Telinfy: built and parked, not active. How to switch it on: sms/README.md
 common/      Shared sheet script: menu, tab setup, dashboard, limits (Core.gs + appsscript.json)
   Dashboard.gs      read-only JSON feed for the web dashboard (published as an Apps Script web app)
   test/             offline tests for the sheet scripts:  node --test common/test/sheet.test.js
