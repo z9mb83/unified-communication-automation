@@ -408,6 +408,17 @@ test('dashboard feed: dates, pipeline counts, daily series, key check', () => {
   const snap3 = g.dbSnapshot_(master, new Date(Date.UTC(2026, 8, 28, 12, 0)));
   assert.deepStrictEqual(JSON.parse(JSON.stringify(snap3.waReadNoReply)),
     [{ time: '2026-09-27 11:00', brand: '99M', name: 'Quiet reader', phone: '9811100001' }]);
+  // report: only leads that were emailed or sent a WhatsApp, both channels on one object
+  t.getRange(6, 18).setValue('Waiting (test mode)');   // not really sent -> not in the report
+  const rep = g.dbReport_(master, new Date(Date.UTC(2026, 8, 28, 12, 0)));
+  const mine = rep.leads.filter(l => l.brand === '99M');
+  assert.deepStrictEqual([...mine.map(l => l.row)], [3, 7]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(mine[0])), { brand: '99M', row: 3, name: 'Sent+replied', email: 'a@x.com', phone: '98111',
+    mail: { status: 'Sent', sentAt: '2026-09-28 11:00', from: 'm@g.com', subject: 'S', error: '', replied: true, repliedAt: '2026-09-28 16:19' },
+    whatsapp: { status: 'Sent', sentAt: '', delivery: 'Read', consent: true, info: '', replied: true, repliedAt: '2026-09-28 16:00', lastReply: 'Interested' } });
+  assert.strictEqual(mine[1].mail.status, 'Bounced');
+  assert.strictEqual(mine[1].whatsapp.status, 'Failed');
+  assert.strictEqual(rep.generatedAt, '2026-09-28 17:30');
   // key check
   assert.ok(!g.dbKeyOk_('anything'));
   globals.__props.DASH_KEY = 'k'.repeat(64);

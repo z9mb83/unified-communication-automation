@@ -164,6 +164,38 @@ function dbSnapshot_(ss, nowDate) {
   };
 }
 
+/* ============================== report (download) ============================== */
+
+/**
+ * Every lead that was emailed or sent a WhatsApp, one object per brand-tab row, for the dashboard's
+ * "Download report" (the dashboard filters by brand/period and builds the Excel file). Read-only.
+ * Full emails and phone numbers: the report is for the team behind the dashboard password.
+ */
+function dbReport_(ss, nowDate) {
+  var now = Utilities.formatDate(nowDate, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'), out = [];
+  var MAIL = ['Sent', 'Failed', 'Bounced', 'Unsubscribed'];
+  CC.BRANDS.forEach(function (b) {
+    var sh = ss.getSheetByName(b[0]);
+    if (!sh) return;
+    mlReadDisplay_(sh, 3, 1, 24).forEach(function (r, i) {
+      var mailStatus = String(r[5] || '').trim(), mailAt = dbStamp_(r[6]);
+      var waStatus = String(r[17] || '').trim(), waAt = dbStamp_(r[18]);
+      var mailed = MAIL.indexOf(mailStatus) !== -1 || !!mailAt;
+      var whatsapped = !!waStatus && waStatus !== 'Waiting (test mode)';
+      if (!mailed && !whatsapped) return;
+      var t = function (v, n) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n || 200); };
+      out.push({
+        brand: b[0], row: i + 3, name: t(r[0], 120), email: t(r[1], 120), phone: t(r[14], 30),
+        mail: mailed ? { status: mailStatus, sentAt: mailAt, from: t(r[8], 80), subject: t(r[3], 160), error: t(r[7], 160),
+          replied: ccYes_(r[12]), repliedAt: dbStamp_(r[13]) } : null,
+        whatsapp: whatsapped ? { status: waStatus, sentAt: waAt, delivery: t(r[20], 120), consent: ccYes_(r[16]),
+          info: t(r[19], 160), replied: ccYes_(r[21]), repliedAt: dbStamp_(r[22]), lastReply: t(r[23], 500) } : null
+      });
+    });
+  });
+  return { generatedAt: now, timezone: 'Asia/Kolkata', leads: out };
+}
+
 /* ============================== web app ============================== */
 
 function dbKeyOk_(given) {
@@ -180,7 +212,10 @@ function doGet(e) {
   if (e && e.parameter && e.parameter['hub.mode']) return waVerifyWebhook_(e.parameter);
   var out;
   if (!dbKeyOk_(e && e.parameter && e.parameter.key)) out = { error: 'unauthorized' };
-  else {
+  else if (e.parameter.report === 'leads') {
+    try { out = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date()); }
+    catch (err) { out = { error: 'report failed: ' + String(err.message || err).slice(0, 200) }; }
+  } else {
     var cache = null, hit = null;
     try { cache = CacheService.getScriptCache(); hit = cache.get('dash'); } catch (err) { cache = null; }
     if (hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON);
