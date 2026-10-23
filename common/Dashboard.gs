@@ -212,7 +212,10 @@ function doGet(e) {
   if (e && e.parameter && e.parameter['hub.mode']) return waVerifyWebhook_(e.parameter);
   var out;
   if (!dbKeyOk_(e && e.parameter && e.parameter.key)) out = { error: 'unauthorized' };
-  else if (e.parameter.report === 'leads') {
+  else if (e.parameter.inbox) {
+    try { out = ibGet_(e.parameter); }
+    catch (err) { out = { error: 'inbox failed: ' + String(err.message || err).slice(0, 200) }; }
+  } else if (e.parameter.report === 'leads') {
     try { out = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date()); }
     catch (err) { out = { error: 'report failed: ' + String(err.message || err).slice(0, 200) }; }
   } else {
