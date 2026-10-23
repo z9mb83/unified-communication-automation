@@ -33,7 +33,7 @@ function waNormalizePhone_(raw, cc) {
 /** Meta template JSON -> {supported, reason, named, names[], count, status, language, name, header} (header = '', 'image', 'video' or 'document') */
 function waParseTemplate_(t) {
   var out = { supported: true, reason: '', named: String(t.parameter_format || '').toUpperCase() === 'NAMED',
-    names: [], count: 0, status: String(t.status || '').toUpperCase(), language: t.language, name: t.name, header: '' };
+    names: [], count: 0, status: String(t.status || '').toUpperCase(), language: t.language, name: t.name, header: '', body: '' };
   (t.components || []).forEach(function (c) {
     var type = String(c.type || '').toUpperCase();
     if (type === 'HEADER') {
@@ -42,6 +42,7 @@ function waParseTemplate_(t) {
       else if (fmt !== 'TEXT') { out.supported = false; out.reason = fmt + ' header is not supported'; }
       else if (/\{\{/.test(c.text || '')) { out.supported = false; out.reason = 'header variable is not supported'; }
     } else if (type === 'BODY') {
+      out.body = String(c.text || '');
       var re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi, m, seen = {};
       while ((m = re.exec(c.text || '')) !== null) if (!seen[m[1]]) { seen[m[1]] = true; out.names.push(m[1]); }
     } else if (type === 'BUTTONS') {
@@ -85,6 +86,14 @@ function waBuildComponents_(parsed, vars, header) {
   }
   if (params.length) out.push({ type: 'body', parameters: params });
   return out;
+}
+
+/** The text the person actually receives: template body with this row's values filled in ({{1}} or {{name}}). */
+function waTemplateText_(parsed, vars) {
+  if (!parsed || !parsed.body) return '';
+  var byName = {};
+  (parsed.names || []).forEach(function (n, i) { byName[n] = String(vars[i] === undefined || vars[i] === null ? '' : vars[i]).replace(/\s+/g, ' ').trim(); });
+  return parsed.body.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, function (all, n) { return byName[n] !== undefined && byName[n] !== '' ? byName[n] : all; });
 }
 
 function waClassifyError_(httpCode, body) {
@@ -209,7 +218,8 @@ function waSendSelected() {
         sh.getRange(r.row, CC.COL.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]);
         failed.push('Row ' + r.row + ': ' + e.message); continue;
       }
-      var res = waSendOne_(sh, r.row, code, r.to, setup, token, components, logSheet, logs);
+      var res = waSendOne_(sh, r.row, code, r.to, setup, token, components, logSheet, logs,
+        waTemplateText_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; })));
       if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) break; }
     }
   } finally {
@@ -376,9 +386,15 @@ function waContext_() {
   return ctx;
 }
 
+/** WhatsApp Log columns H:I (full number, exact text) were added for the dashboard inbox. */
+function waLogHeaders_(logSheet) {
+  if (String(logSheet.getRange(1, 8).getValue()) !== 'To') logSheet.getRange(1, 8, 1, 2).setValues([['To', 'Text']]).setFontWeight('bold');
+}
+
 /** Sends one template message and writes status + log. Returns {ok, stop}. */
-function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, logs) {
+function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, logs, text) {
   var C = CC.COL;
+  waLogHeaders_(logSheet);
   sh.getRange(rowNo, C.WA_STATUS).setValue(WA.SENDING);
   SpreadsheetApp.flush();
   var res = waGraph_(setup.phoneId + '/messages', token, 'post', {
@@ -390,13 +406,15 @@ function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, log
   if (res.code === 200 && res.body.messages && res.body.messages.length) {
     var id = res.body.messages[0].id;
     sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Sent', stamp, id]]);
-    var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id];
+    var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id, to, String(text || '').slice(0, 1500)];
     logSheet.appendRow(entry); logs.push(entry);
-    return { ok: true, stop: false };
+    ibTouch_();
+    return { ok: true, stop: false, id: id };
   }
   var cls = waClassifyError_(res.code, res.body);
   sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[cls.status, stamp, cls.message]]);
-  logSheet.appendRow([stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message]);
+  logSheet.appendRow([stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message, to, String(text || '').slice(0, 1500)]);
+  ibTouch_();
   return { ok: false, stop: cls.message.indexOf('Access token') === 0 || cls.status === 'Retry', message: cls.message };
 }
 
@@ -447,7 +465,8 @@ function waRun_() {
         } catch (e) {
           sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]); marked++; continue;
         }
-        var r = waSendOne_(sh, rowNo, code, check.to, setup, token, components, logSheet, logs);
+        var r = waSendOne_(sh, rowNo, code, check.to, setup, token, components, logSheet, logs,
+          waTemplateText_(parsed, setup.varCols.map(function (c) { return c ? rows[i][c - 1] : ''; })));
         budget--;
         if (r.ok) { sent++; allow.allowed--; } else if (r.stop) break;
       }
@@ -465,7 +484,9 @@ function waRun_() {
  * message a customer sends us and for delivery updates of what we sent.
  *   - replies:   brand tab V:X (replied, replied at, last reply) + one row per message in "WhatsApp Replies"
  *   - delivery:  brand tab U ("Delivered" / "Read" / "Failed: <reason>") - column R is never changed
- *   - STOP:      a reply of just STOP / unsubscribe adds the phone to Do Not Contact
+ *   - opt-out:   STOP / unsubscribe / "don't message" / "band karo"... adds the phone AND the lead's email to Do Not Contact
+ *                and sends one confirmation; "not interested"-type replies are only flagged ("Possible opt-out")
+ *   - brand:     taken from the business number the customer wrote to (WhatsApp Setup > Phone Number ID)
  * The callback URL carries a secret ?key= (Script Property WA_HOOK_KEY); requests without it are ignored.
  * Optional Script Property WA_FORWARD_URL: every webhook body is passed on to that URL too
  * (to keep an older WhatsApp bot working).
@@ -475,6 +496,13 @@ function waRun_() {
 var WAH = {
   HOOK_PROP: 'WA_HOOK_KEY', VERIFY_PROP: 'WA_VERIFY_TOKEN', FORWARD_PROP: 'WA_FORWARD_URL',
   STOP_WORDS: ['stop', 'unsubscribe', 'stop all', 'opt out', 'optout', 'remove me', 'stop messages'],
+  // phrases anywhere in a short reply that mean "never contact me again"
+  STOP_PHRASES: [/\bstop\b/, /\bunsubscribe\b/, /\bopt[\s-]?out\b/, /\bremove (me|my number)\b/, /\bdo ?n[o']?t (message|msg|text|send|contact|call)\b/,
+    /\bdont (message|msg|text|send|contact|call)\b/, /\bno more (messages|msgs|texts)\b/, /\bband karo\b/, /\bmat bhej/, /\b(message|msg|messages) mat\b/,
+    /\bblock(ed)? (you|kar)/, /\breport (you|kar)/],
+  // replies that may mean "no": flagged for a person to decide, never acted on automatically
+  MAYBE_PHRASES: [/\bnot interested\b/, /\bno interest\b/, /\bno thanks?\b/, /\bnot (looking|required|needed)\b/, /\bnahi chahiye\b/,
+    /\binterested nahi\b/, /\bnahi chaiye\b/, /\bwrong number\b/],
   RANK: { delivered: 1, read: 2 },
   WEBAPP_URL: 'https://script.google.com/macros/s/AKfycbwJXy-XZJsxRQXFFrtJXCgCY0JEyaKOC3Dz6kYqGcwxy5kvONm3HZ46gXNvNlz1oU6EwA/exec'
 };
@@ -503,7 +531,7 @@ function waParseWebhook_(body) {
       (v.messages || []).forEach(function (m) {
         out.messages.push({ id: String(m.id || ''), from: String(m.from || ''), name: names[m.from] || '',
           time: Number(m.timestamp || 0), type: String(m.type || ''), text: waMessageText_(m),
-          context: String((m.context && m.context.id) || '') });
+          context: String((m.context && m.context.id) || ''), biz: String((v.metadata && v.metadata.phone_number_id) || '') });
       });
       (v.statuses || []).forEach(function (st) {
         var err = (st.errors && st.errors[0]) || null;
@@ -520,12 +548,36 @@ function waIsStop_(text) {
   return WAH.STOP_WORDS.indexOf(String(text || '').trim().toLowerCase().replace(/[.!\s]+$/, '')) !== -1;
 }
 
+/** 'stop' (never contact again), 'maybe' (flag for review) or ''. Only short replies count (a long message that
+ *  happens to contain "stop" is a conversation, not an opt-out). */
+function waOptOutKind_(text) {
+  var t = String(text || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (waIsStop_(t)) return 'stop';
+  if (t.length > 120) return '';
+  if (WAH.STOP_PHRASES.some(function (re) { return re.test(t); })) return 'stop';
+  if (WAH.MAYBE_PHRASES.some(function (re) { return re.test(t); })) return 'maybe';
+  return '';
+}
+
+/** Brands whose WhatsApp Setup uses this business number (Phone Number ID). */
+function waBrandsForBiz_(biz) {
+  if (!biz) return [];
+  return CC.BRANDS.map(function (b) { return b[0]; }).filter(function (code) { var s = waSetup_(code); return s && s.phoneId === biz; });
+}
+
 /**
  * Which lead row a message belongs to. tabs = {code: rows (A:X display values from row 3)}.
  * 1) the message we sent that they replied to (context id = column T); 2) same phone, most recently messaged.
  */
-function waMatchLead_(tabs, from, contextId, cc) {
+function waMatchLead_(tabs, from, contextId, cc, codes) {
   var C = CC.COL, best = null;
+  if (codes && codes.length) {   // the business number they wrote to decides the brand when it can
+    var mine = {};
+    codes.forEach(function (c) { if (tabs[c]) mine[c] = tabs[c]; });
+    var hit = waMatchLead_(mine, from, contextId, cc);
+    if (hit) return hit;
+  }
   Object.keys(tabs).forEach(function (code) {
     tabs[code].forEach(function (r, i) {
       var hit = { code: code, row: i + 3, name: String(r[C.NAME - 1] || '').trim(), sentAt: String(r[C.WA_SENT_AT - 1] || '') };
@@ -592,29 +644,57 @@ function waApplyWebhook_(parsed) {
     var first = Math.max(2, replySheet.getLastRow() - 300);
     replySheet.getRange(first, 8, replySheet.getLastRow() - first + 1, 1).getDisplayValues().forEach(function (r) { seen[r[0]] = true; });
   }
-  var dnc = ccSheet_('Do Not Contact'), dncPhones = {};
+  var dnc = ccSheet_('Do Not Contact'), dncPhones = {}, dncEmails = {};
   mlReadDisplay_(dnc, 2, 1, 5).forEach(function (r) {
+    if (String(r[0]).trim()) dncEmails[String(r[0]).trim().toLowerCase()] = true;
     try { if (String(r[4]).trim()) dncPhones[waNormalizePhone_(r[4], cc)] = true; } catch (e) { /* ignore */ }
   });
+  if (String(replySheet.getRange(1, 9).getValue()) !== CC.WA_REPLY_HEADERS[8]) {
+    replySheet.getRange(1, 1, 1, CC.WA_REPLY_HEADERS.length).setValues([CC.WA_REPLY_HEADERS]).setFontWeight('bold');
+  }
   parsed.messages.forEach(function (m) {
     if (!m.id || seen[m.id] || (cache && cache.get('wam_' + m.id))) return;  // Meta re-sends when unsure
     seen[m.id] = true;
     if (cache) { try { cache.put('wam_' + m.id, '1', 21600); } catch (e) { /* ignore */ } }
-    var lead = waMatchLead_(tabs, m.from, m.context, cc), stamp = waStampFromEpoch_(m.time);
-    var text = String(m.text || '').slice(0, 1000);
+    var codes = waBrandsForBiz_(m.biz);
+    var lead = waMatchLead_(tabs, m.from, m.context, cc, codes), stamp = waStampFromEpoch_(m.time);
+    var brand = lead ? lead.code : (codes.length === 1 ? codes[0] : '');
+    var text = String(m.text || '').slice(0, 1000), kind = m.type === 'text' || m.type === 'button' ? waOptOutKind_(m.text) : '';
     if (lead) {
       sheets[lead.code].getRange(lead.row, C.WA_REPLIED, 1, 3).setValues([['Yes', stamp, text.slice(0, 500)]]);
     }
-    replySheet.appendRow([stamp, lead ? lead.code : '', lead ? String(lead.row) : '', lead ? lead.name : m.name,
-      m.from, text, m.type, m.id]);
+    replySheet.appendRow([stamp, brand, lead ? String(lead.row) : '', lead ? lead.name : m.name,
+      m.from, text, m.type, m.id, m.biz, kind === 'stop' ? 'Opted out' : kind === 'maybe' ? 'Possible opt-out' : '']);
     done.replies++;
-    if (waIsStop_(m.text) && !dncPhones[m.from]) {
-      dnc.appendRow(['', 'WhatsApp STOP reply', stamp, lead ? lead.code : '', m.from]);
+    if (kind === 'stop' && !dncPhones[m.from]) {
+      var email = lead ? String(tabs[lead.code][lead.row - 3][C.EMAIL - 1] || '').trim().toLowerCase() : '';
+      dnc.appendRow([email && !dncEmails[email] ? email : '', 'WhatsApp opt-out: "' + text.slice(0, 60) + '"', stamp, brand, m.from]);
       dncPhones[m.from] = true;
+      if (email) dncEmails[email] = true;
       done.stops++;
+      waOptOutConfirm_(brand, m.from, m.biz, lead);
     }
   });
+  ibTouch_();
   return done;
+}
+
+/**
+ * One free-text confirmation after an opt-out (allowed: they wrote to us in the last 24 hours).
+ * People who get a clear "you're unsubscribed" rarely block or report the number. Logged as an Auto-reply.
+ */
+function waOptOutConfirm_(code, to, biz, lead) {
+  try {
+    var setup = code ? waSetup_(code) : null, token = waToken_(code || 'ALL'), b = ccBrand_(code);
+    var phoneId = (setup && setup.phoneId) || biz;
+    if (!phoneId || !token) return;
+    var text = 'You will not receive further messages from ' + (b ? b[2] : 'us') + '. Sorry for the disturbance.';
+    var res = waGraph_(phoneId + '/messages', token, 'post', { messaging_product: 'whatsapp', to: to, type: 'text', text: { body: text } });
+    var log = ccSheet_('WhatsApp Log');
+    waLogHeaders_(log);
+    log.appendRow([waStampFromEpoch_(0), code || '', lead ? String(lead.row) : '', to.slice(0, 4) + '****' + to.slice(-3), '(opt-out confirmation)',
+      res.code === 200 ? 'Auto-reply' : 'Auto-reply failed', res.code === 200 ? ((res.body.messages || [{}])[0].id || '') : waClassifyError_(res.code, res.body).message, to, text]);
+  } catch (e) { Logger.log('opt-out confirmation failed: ' + e.message); }
 }
 
 function waHookKeyOk_(given) {
@@ -631,6 +711,7 @@ function waVerifyWebhook_(p) {
 
 /** POST from Meta: a customer message or a delivery update. Always answers quickly with "ok". */
 function doPost(e) {
+  if (e && e.parameter && e.parameter.action) return ibPost_(e);   // dashboard inbox (Inbox.gs), key-protected there
   var reply = ContentService.createTextOutput('ok');
   if (!e || !e.parameter || !waHookKeyOk_(e.parameter.key)) return reply;
   var raw = (e.postData && e.postData.contents) || '';

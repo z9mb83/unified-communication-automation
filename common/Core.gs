@@ -1,6 +1,6 @@
 /**
  * AUTOMATION CONTROL CENTER — shared setup (menu, tabs, dashboard, limits).
- * Repo: common/Core.gs   (mail/sheet/Mail.gs and whatsapp/WhatsApp.gs live in the same Apps Script project)
+ * Repo: common/Core.gs   (mail/sheet/Mail.gs, whatsapp/WhatsApp.gs, common/Dashboard.gs and common/Inbox.gs live in the same Apps Script project)
  *
  * Tabs created by "Set up / repair tabs" (never deletes data; only adds missing tabs/headers):
  *   Dashboard · SB · 99M · 99S · PE · SC · Limits · Mailboxes · WhatsApp Setup · Do Not Contact ·
@@ -34,7 +34,7 @@ var CC = {
     WA_STATUS: 18, WA_SENT_AT: 19, WA_ID: 20, WA_DELIVERY: 21, WA_REPLIED: 22, WA_REPLIED_AT: 23, WA_REPLY: 24 },
   MAILBOX_HEADERS: ['Mailbox', 'Enabled?', 'Warm-up Stage', 'Daily Limit', 'Hourly Limit', 'Sent Today', 'Sent This Hour',
     'Clean Days', 'Last Sent At', 'Next Eligible Time', 'Paused?', 'Pause Reason', 'Last Result'],
-  WA_REPLY_HEADERS: ['Received at', 'Brand', 'Row', 'Name', 'Phone', 'Message', 'Type', 'Message ID'],
+  WA_REPLY_HEADERS: ['Received at', 'Brand', 'Row', 'Name', 'Phone', 'Message', 'Type', 'Message ID', 'Business number ID', 'Flag'],
   SEND_LOG_HEADERS: ['Date and Time', 'Gmail Sender', 'Lead Email', 'Subject', 'Gmail Message ID', 'Sending Result',
     'Error Reason', 'Daily Limit', 'Warm-up Stage'],
   LIMIT_HEADERS: ['Brand', 'Channel', 'On (Yes/No)', 'Max per day', 'Max per hour', 'Minimum gap (minutes)',
@@ -48,7 +48,8 @@ var CC = {
     ['Old email sheet ID', '18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI', 'Only read by "Import from old email sheet"'],
     ['Mail switched to this sheet', 'No', 'Set to Yes by the switch-over. When Yes, importing from the old sheet is blocked.'],
     ['Last import', '', 'Updated automatically'],
-    ['Automatic WhatsApp', 'Off', 'Updated by the WhatsApp menu']
+    ['Automatic WhatsApp', 'Off', 'Updated by the WhatsApp menu'],
+    ['Max dashboard WhatsApp per day', '20', 'New contacts sent from the dashboard inbox, all brands together']
   ]
 };
 
@@ -240,7 +241,7 @@ function ccSetup() {
   if (was.created || was.sheet.getLastRow() < 2) {
     was.sheet.getRange(2, 1, CC.BRANDS.length, 6).setValues(CC.BRANDS.map(function (b) { return [b[0], '', '', '', 'en', 'A']; }));
   }
-  ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error'], { text: true });
+  ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error', 'To', 'Text'], { text: true });
   ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
 
   // Brand tabs + technical mail tabs

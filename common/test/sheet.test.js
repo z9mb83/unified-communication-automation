@@ -8,7 +8,7 @@ const vm = require('vm');
 const { FakeSpreadsheet, makeGlobals } = require('./fake_sheets');
 
 const ROOT = path.join(__dirname, '..', '..');
-const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs', 'common/Dashboard.gs'];
+const FILES = ['common/Core.gs', 'mail/sheet/Mail.gs', 'whatsapp/WhatsApp.gs', 'common/Dashboard.gs', 'common/Inbox.gs'];
 
 function load(globals) {
   const ctx = vm.createContext(Object.assign({ console }, globals));
@@ -529,7 +529,8 @@ test('WhatsApp webhook: parse, match lead, delivery status, replies, STOP, dedup
   const dnc = master.getSheetByName('Do Not Contact');
   const dncRows = dnc.getRange(2, 1, dnc.getLastRow() - 1, 5).getValues().filter(r => r[4] === '918168429342');
   assert.strictEqual(dncRows.length, 1);
-  assert.strictEqual(dncRows[0][1], 'WhatsApp STOP reply');
+  assert.ok(dncRows[0][1].startsWith('WhatsApp opt-out'), dncRows[0][1]);
+  assert.strictEqual(dncRows[0][0], 'a@x.com');                       // their email stops too
 
   // unknown number: logged without a brand; failed delivery shows the reason
   post(key, metaBody({ contacts: [{ wa_id: '919999999999', profile: { name: 'Stranger' } }],
@@ -537,4 +538,132 @@ test('WhatsApp webhook: parse, match lead, delivery status, replies, STOP, dedup
     statuses: [{ id: 'wamid.OLD', status: 'failed', recipient_id: '918168429342', errors: [{ code: 131049, title: 'not delivered' }] }] }));
   assert.deepStrictEqual(Array.from(rep.getRange(rep.getLastRow(), 2, 1, 4).getValues()[0]), ['', '', 'Stranger', '919999999999']);
   assert.strictEqual(sh.getRange(4, 21).getValue(), 'Failed: 131049 not delivered');
+});
+
+/* ============================== inbox ============================== */
+
+test('opt-out wording: clear stops act, "not interested" is only flagged, long messages are conversations', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  for (const s of ['STOP', 'stop.', 'Please stop messaging me', "don't message me again", 'Dont send these', 'unsubscribe pls',
+    'remove my number', 'band karo ye sab', 'mat bhejo', 'no more messages', 'Opt-out']) assert.strictEqual(g.waOptOutKind_(s), 'stop', s);
+  for (const s of ['Not interested', 'no thanks', 'nahi chahiye', 'wrong number']) assert.strictEqual(g.waOptOutKind_(s), 'maybe', s);
+  for (const s of ['Interested, call me', 'What is the price?', 'hi', '']) assert.strictEqual(g.waOptOutKind_(s), '', s);
+  assert.strictEqual(g.waOptOutKind_('We are interested but please do not stop at the gate, ' + 'x'.repeat(120)), '');
+});
+
+test('template text: the exact message the person received', () => {
+  const g = load(makeGlobals({ active: new FakeSpreadsheet() }));
+  const pos = g.waParseTemplate_({ name: 'intro', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}, {{2}} here.' }] });
+  assert.strictEqual(g.waTemplateText_(pos, ['Rohit', ' Shaadi  Bells ']), 'Hi Rohit, Shaadi Bells here.');
+  const named = g.waParseTemplate_({ name: 'n', status: 'APPROVED', parameter_format: 'NAMED', components: [{ type: 'BODY', text: 'Hello {{name}}!' }] });
+  assert.strictEqual(g.waTemplateText_(named, ['Anita']), 'Hello Anita!');
+  assert.strictEqual(g.waTemplateText_(pos, ['', '']), 'Hi {{1}}, {{2}} here.');
+});
+
+function inboxMaster(fetch) {
+  const master = new FakeSpreadsheet();
+  master.insertSheet('Start');
+  const globals = makeGlobals({ active: master, others: { master }, fetch });
+  const g = load(globals);
+  g.ccSetup();
+  globals.__props.WA_TOKEN_ALL = 'x'.repeat(40);
+  globals.__props.DASH_KEY = 'k'.repeat(64);
+  globals.__props.SHEET_ID = 'master';
+  const setup = master.getSheetByName('WhatsApp Setup');
+  setup.getRange(2, 1, 2, 6).setValues([['SB', 'PHONE_SB', 'WABA', 'intro', 'en', 'A'], ['99M', 'PHONE_M', 'WABA', 'intro', 'en', 'A']]);
+  return { master, globals, g };
+}
+const tplFetch = (calls) => (url, opts) => {
+  calls.push({ url, opts });
+  let reply;
+  if (url.includes('message_templates')) reply = { data: [{ name: 'intro', language: 'en', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}, welcome!' }] }] };
+  else if (url.includes('quality_rating')) reply = { display_phone_number: '+91 90000 00000', quality_rating: 'GREEN', messaging_limit_tier: 'TIER_250' };
+  else reply = { messages: [{ id: 'wamid.NEW' + calls.length }] };
+  return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+};
+
+test('webhook: brand comes from the business number; opt-out confirmation is sent and logged', () => {
+  const calls = [];
+  const { master, globals, g } = inboxMaster(tplFetch(calls));
+  globals.__props.WA_HOOK_KEY = 'h'.repeat(64);
+  // the same person is a lead in SB and in 99M
+  master.getSheetByName('SB').getRange(3, 1, 1, 20).setValues([['Ravi SB', 'r@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811100001', 'Yes', 'Yes', 'Sent', '2026-10-20 10:00:00', 'wamid.SB1']]);
+  master.getSheetByName('99M').getRange(3, 1, 1, 20).setValues([['Ravi 99M', 'r@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811100001', 'Yes', 'Yes', 'Sent', '2026-10-21 10:00:00', 'wamid.M1']]);
+  const body = (id, text, biz) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { metadata: { phone_number_id: biz },
+    messages: [{ id, from: '919811100001', timestamp: '1792900000', type: 'text', text: { body: text } }] } }] }] });
+  const post = (b) => g.doPost({ parameter: { key: 'h'.repeat(64) }, postData: { contents: JSON.stringify(b) } });
+  post(body('wamid.A', 'Yes please', 'PHONE_SB'));     // newest send was 99M, but they wrote to the SB number
+  const rep = master.getSheetByName('WhatsApp Replies');
+  assert.deepStrictEqual([...rep.getRange(2, 1, 1, 10).getValues()[0]].slice(1, 3).concat([rep.getRange(2, 9).getValue(), rep.getRange(2, 10).getValue()]), ['SB', '3', 'PHONE_SB', '']);
+  assert.strictEqual(master.getSheetByName('SB').getRange(3, 22).getValue(), 'Yes');
+  assert.strictEqual(master.getSheetByName('99M').getRange(3, 22).getValue(), '');
+  post(body('wamid.B', 'Not interested', 'PHONE_M'));
+  assert.strictEqual(rep.getRange(3, 10).getValue(), 'Possible opt-out');
+  assert.strictEqual(master.getSheetByName('Do Not Contact').getLastRow(), 1);   // flagged only
+  post(body('wamid.C', 'please stop messaging', 'PHONE_M'));
+  assert.strictEqual(rep.getRange(4, 10).getValue(), 'Opted out');
+  const dnc = master.getSheetByName('Do Not Contact').getRange(2, 1, 1, 5).getValues()[0];
+  assert.deepStrictEqual([dnc[0], dnc[3], dnc[4]], ['r@x.com', '99M', '919811100001']);
+  const sendCall = calls.find(c => c.url.endsWith('PHONE_M/messages'));
+  assert.ok(sendCall && JSON.parse(sendCall.opts.payload).text.body.includes('99 Marketing Services'));
+  const log = master.getSheetByName('WhatsApp Log');
+  const last = log.getRange(log.getLastRow(), 1, 1, 9).getValues()[0];
+  assert.deepStrictEqual([last[1], last[4], last[5], last[7]], ['99M', '(opt-out confirmation)', 'Auto-reply', '919811100001']);
+});
+
+test('inbox: add contact + send, duplicates, Do Not Contact, daily cap, opt-out, chats and messages', () => {
+  const calls = [];
+  const { master, globals, g } = inboxMaster(tplFetch(calls));
+  g.ccSetSetting_('WhatsApp live sending', 'Yes');
+  const lim = master.getSheetByName('Limits');
+  lim.getRange(g.ccLimits_('SB', 'WhatsApp').row, 3).setValue('Yes');
+  const sb = master.getSheetByName('SB');
+  sb.getRange(3, 1, 1, 2).setValues([['Existing', 'e@x.com']]);
+  const post = (action, body, key = 'k'.repeat(64)) => JSON.parse(g.doPost({ parameter: { action, key }, postData: { contents: JSON.stringify(body) } }).text);
+  assert.strictEqual(post('add', { brand: 'SB', phone: '9811100002' }, 'bad').message, 'unauthorized');
+  assert.match(post('add', { brand: 'XX', phone: '9811100002' }).message, /brand/);
+  assert.match(post('add', { brand: 'SB', phone: '12' }).message, /not valid/);
+
+  const r = post('add', { brand: 'SB', phone: '+91 98111 00002', name: 'Rohit', email: 'Rohit@X.com', source: 'Cold', send: true });
+  assert.ok(r.ok && r.sent, JSON.stringify(r));
+  assert.strictEqual(r.row, 4);
+  assert.deepStrictEqual([...sb.getRange(4, 1, 1, 2).getValues()[0]], ['Rohit', 'rohit@x.com']);
+  assert.deepStrictEqual([sb.getRange(4, 15).getValue(), sb.getRange(4, 16).getValue(), sb.getRange(4, 17).getValue(), sb.getRange(4, 18).getValue()], ['919811100002', 'Yes', 'Yes', 'Sent']);
+  assert.match(sb.getRange(4, 1).getNote(), /Added from dashboard .* Source: Cold/);
+  const log = master.getSheetByName('WhatsApp Log');
+  assert.deepStrictEqual([log.getRange(2, 8).getValue(), log.getRange(2, 9).getValue()], ['919811100002', 'Hi Rohit, welcome!']);
+  assert.strictEqual(sb.getRange(3, 1).getValue(), 'Existing');      // existing rows untouched
+
+  const dup = post('add', { brand: 'SB', phone: '09811100002' });
+  assert.ok(!dup.ok && dup.exists && dup.row === 4);
+  master.getSheetByName('Do Not Contact').getRange(2, 1, 1, 5).setValues([['', 'x', '', '', '919811100099']]);
+  assert.match(post('add', { brand: 'SB', phone: '9811100099' }).message, /Do Not Contact/);
+
+  // a reply arrives -> one chat with the sent template and the reply
+  master.getSheetByName('WhatsApp Replies').getRange(2, 1, 1, 10).setValues([['2099-01-01 11:00:00', 'SB', '4', 'Rohit', '919811100002', 'Call me', 'text', 'wamid.R', 'PHONE_SB', '']]);
+  sb.getRange(4, 21).setValue('Read');
+  const inbox = g.doGet({ parameter: { key: 'k'.repeat(64), inbox: 'all' } });
+  const data = JSON.parse(inbox.text);
+  assert.ok(!data.error, data.error);
+  const chat = data.chats.find(c => c.id === 'SB|919811100002');
+  assert.ok(chat, JSON.stringify(data.chats));
+  assert.deepStrictEqual([chat.name, chat.lastText, chat.lastDir, chat.optedOut], ['Rohit', 'Call me', 'in', false]);
+  const thread = data.messages.filter(m => m.chat === chat.id);
+  assert.deepStrictEqual(thread.map(m => [m.dir, m.text, m.status || '']), [['out', 'Hi Rohit, welcome!', 'read'], ['in', 'Call me', '']]);
+  assert.strictEqual(data.quality[0].quality, 'GREEN');
+  assert.strictEqual(data.sentToday, 1);
+  assert.ok(JSON.parse(g.doGet({ parameter: { key: 'k'.repeat(64), inbox: 'ver' } }).text).version);
+  assert.strictEqual(JSON.parse(g.doGet({ parameter: { key: 'bad', inbox: 'all' } }).text).error, 'unauthorized');
+
+  // mark opted out from the inbox -> phone + email in Do Not Contact, chat shows it, sending refused
+  assert.ok(post('optout', { brand: 'SB', phone: '919811100002' }).ok);
+  const dnc = master.getSheetByName('Do Not Contact');
+  assert.deepStrictEqual([dnc.getRange(3, 1).getValue(), dnc.getRange(3, 5).getValue()], ['rohit@x.com', '919811100002']);
+  const after = JSON.parse(g.doGet({ parameter: { key: 'k'.repeat(64), inbox: 'all' } }).text);
+  assert.strictEqual(after.chats.find(c => c.id === 'SB|919811100002').flag, 'Opted out');
+
+  // daily cap
+  g.ccSetSetting_('Max dashboard WhatsApp per day', '1');
+  const capped = post('add', { brand: 'SB', phone: '9811100003', name: 'Next', send: true });
+  assert.ok(capped.ok && !capped.sent && /Daily limit/.test(capped.message), JSON.stringify(capped));
 });
