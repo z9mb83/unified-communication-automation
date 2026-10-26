@@ -8,14 +8,32 @@
  *   add     add a contact to a brand tab (after the last row) and, if asked, send the brand's template right away
  *   send    send the brand's template to an existing row that has not been sent yet
  *   optout  add a number (and the row's email) to Do Not Contact
+ *   reply   send a typed message (free text) - only within 24 hours of the customer's last message (WhatsApp rule)
  * Full phone numbers are returned: they are only ever shown behind the dashboard password.
  * Sends obey Do Not Contact, test mode ("WhatsApp live sending"), the brand's WhatsApp On switch and a daily cap
  * (Settings "Max dashboard WhatsApp per day"); sending hours, gap and per-brand limits are ignored (a person asked).
  */
 
-var IB = { VER_KEY: 'ib_ver', FULL_KEY: 'ib_full', TPL_KEY: 'ib_tpl_', Q_KEY: 'ib_quality', DAY_PROP: 'IB_SENT_' };
+var IB = { VER_KEY: 'ib_ver', FULL_KEY: 'ib_full', TPL_KEY: 'ib_tpl_', Q_KEY: 'ib_quality', DAY_PROP: 'IB_SENT_',
+  OK_RESULTS: ['Sent', 'Auto-reply', 'Reply sent'], WINDOW_MS: 24 * 3600 * 1000, MAX_TEXT: 4096 };
 
 /* ============================== pure helpers (unit-tested) ============================== */
+
+/** Any sheet time ('2026-10-23 9:05:12', '23-Oct-2026 09:05', a Date) -> 'yyyy-MM-dd HH:mm:ss' so times sort and compare. */
+function ibTime_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  var s = String(v || '').trim(), p = function (n) { return ('0' + n).slice(-2); };
+  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if (m) return m[1] + '-' + p(m[2]) + '-' + p(m[3]) + ' ' + p(m[4]) + ':' + m[5] + ':' + (m[6] || '00');
+  var d = dbStamp_(s);
+  return d ? d + ':00' : '';
+}
+
+/** India time 'yyyy-MM-dd HH:mm:ss' -> epoch ms. */
+function ibMs_(t) {
+  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(t || '');
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) - 330 * 60000 : 0;
+}
 
 function ibPhone_(raw, cc) {
   try { return waNormalizePhone_(raw, cc || '91'); } catch (e) { return ''; }
@@ -24,7 +42,7 @@ function ibPhone_(raw, cc) {
 /** Status of one message we sent: 'failed' | 'read' | 'delivered' | 'sent'. */
 function ibOutStatus_(result, delivery) {
   var r = String(result || '').trim(), d = String(delivery || '').trim();
-  if (r !== 'Sent' && r !== 'Auto-reply') return 'failed';
+  if (IB.OK_RESULTS.indexOf(r) === -1) return 'failed';
   if (d.indexOf('Failed') === 0) return 'failed';
   if (d === 'Read') return 'read';
   if (d === 'Delivered') return 'delivered';
@@ -41,7 +59,7 @@ function ibBuild_(src) {
   var chat = function (code, phone, row) {
     var id = (code || '?') + '|' + phone;
     if (!chats[id]) chats[id] = { id: id, brand: code || '', phone: phone, name: '', email: '', row: 0, optedOut: !!src.dncPhones[phone],
-      flag: '', lastTime: '', lastText: '', lastDir: '', waStatus: '', delivery: '', unread: 0 };
+      flag: '', lastTime: '', lastText: '', lastDir: '', lastInTime: '', waStatus: '', delivery: '', unread: 0 };
     if (row && !chats[id].row) chats[id].row = row;
     return chats[id];
   };
@@ -60,7 +78,7 @@ function ibBuild_(src) {
     });
   });
   src.log.forEach(function (r, i) {
-    var time = dbStamp_(r[0]), code = String(r[1] || '').trim(), row = Number(r[2]) || 0;
+    var time = ibTime_(r[0]), code = String(r[1] || '').trim(), row = Number(r[2]) || 0;
     if (!time) return;
     var lead = rowPhone[code + '|' + row];
     var phone = ibPhone_(r[7], cc) || (lead ? lead.phone : '');
@@ -71,12 +89,14 @@ function ibBuild_(src) {
     }
     var c = chat(code, phone, row);
     if (!c.name && lead) c.name = String(lead.row[C.NAME - 1] || '').trim();
-    msgs.push({ id: 'o' + i, chat: c.id, dir: 'out', time: String(r[0]).trim().slice(0, 19), text: text || ('Template: ' + String(r[4] || '').trim()),
-      template: String(r[4] || '').trim(), status: ibOutStatus_(result, idDelivery[info]), error: result === 'Sent' || result === 'Auto-reply' ? '' : info,
-      auto: result.indexOf('Auto-reply') === 0 });
+    var kind = result.indexOf('Auto-reply') === 0 ? 'auto' : String(r[4] || '').trim() === '(reply)' ? 'reply' : 'template';
+    var ok = IB.OK_RESULTS.indexOf(result) !== -1;
+    msgs.push({ id: 'o' + i, chat: c.id, dir: 'out', time: time, text: text || ('Template: ' + String(r[4] || '').trim()),
+      template: kind === 'template' ? String(r[4] || '').trim() : '', kind: kind, auto: kind === 'auto', by: String(r[10] || '').trim(),
+      status: ibOutStatus_(result, String(r[9] || '').trim() || idDelivery[info]), error: ok ? '' : info });
   });
   src.replies.forEach(function (r, i) {
-    var time = String(r[0] || '').trim(), phone = ibPhone_(r[4], cc);
+    var time = ibTime_(r[0]), phone = ibPhone_(r[4], cc);
     if (!time || !phone) return;
     var code = String(r[1] || '').trim();
     if (!code) {   // brand unknown: attach to the only chat this number has, if exactly one
@@ -88,7 +108,8 @@ function ibBuild_(src) {
     var flag = String(r[9] || '').trim();
     if (flag === 'Opted out') c.flag = 'Opted out';
     else if (flag && c.flag !== 'Opted out') c.flag = flag;
-    msgs.push({ id: 'i' + i, chat: c.id, dir: 'in', time: time.slice(0, 19), text: String(r[5] || ''), type: String(r[6] || 'text').trim(), flag: flag });
+    msgs.push({ id: 'i' + i, chat: c.id, dir: 'in', time: time, text: String(r[5] || ''), type: String(r[6] || 'text').trim(), flag: flag });
+    if (time > c.lastInTime) c.lastInTime = time;
   });
   msgs.sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
   msgs.forEach(function (m) {
@@ -162,12 +183,12 @@ function ibSnapshot_(ss) {
   CC.BRANDS.forEach(function (b) { var sh = ss.getSheetByName(b[0]); brands[b[0]] = sh ? mlReadDisplay_(sh, 3, 1, 24) : []; });
   read('Do Not Contact', 5).forEach(function (r) { var p = ibPhone_(r[4], cc); if (p) dncPhones[p] = true; });
   read('Limits', 3).forEach(function (r) { if (String(r[1]).trim().toLowerCase() === 'whatsapp') limits[String(r[0]).trim()] = ccYes_(r[2]); });
-  var built = ibBuild_({ brands: brands, log: read('WhatsApp Log', 9), replies: read('WhatsApp Replies', 10), dncPhones: dncPhones, cc: cc,
+  var built = ibBuild_({ brands: brands, log: read('WhatsApp Log', 11), replies: read('WhatsApp Replies', 10), dncPhones: dncPhones, cc: cc,
     templates: ibTemplates_() });
   var quality = [];
   try { quality = ibQuality_(); } catch (e) { quality = []; }
   return {
-    generatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), version: ibVersion_(),
+    generatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), now: Date.now(), version: ibVersion_(),
     live: ccYes_(settings['WhatsApp live sending']), testNumbers: settings['WhatsApp test numbers'] || '',
     waOn: limits, dailyCap: ccNumber_(settings['Max dashboard WhatsApp per day'], 20), sentToday: ibSentToday_(),
     quality: quality, chats: built.chats, messages: built.messages
@@ -272,7 +293,60 @@ function ibOptOut_(p) {
   return { ok: true, message: 'Added to Do Not Contact' + (email ? ' (phone and email).' : '.') };
 }
 
-/** doPost ?action=add|send|optout&key=  (JSON body). */
+/** Last message this number sent us (any brand), as 'yyyy-MM-dd HH:mm:ss', from the newest rows of WhatsApp Replies. */
+function ibLastIncoming_(phone, cc) {
+  var sh = ccSs_().getSheetByName('WhatsApp Replies'), last = '';
+  if (!sh || sh.getLastRow() < 2) return '';
+  var first = Math.max(2, sh.getLastRow() - 3000);
+  sh.getRange(first, 1, sh.getLastRow() - first + 1, 5).getDisplayValues().forEach(function (r) {
+    if (ibPhone_(r[4], cc) !== phone) return;
+    var t = ibTime_(r[0]);
+    if (t > last) last = t;
+  });
+  return last;
+}
+
+/**
+ * Send a typed message. p = {brand, phone, text, by}. WhatsApp allows free text only within 24 hours of the
+ * customer's last message; outside that Meta refuses (131047), so it is checked here first.
+ * Logged in WhatsApp Log as Template "(reply)", Result "Reply sent" (not counted against template limits), K = sender name.
+ */
+function ibReply_(p) {
+  var cc = ccSetting_('Default country code') || '91', phone = ibPhone_(p.phone, cc), code = String(p.brand || '').trim().toUpperCase();
+  var text = String(p.text || '').replace(/\r\n/g, '\n').trim(), by = String(p.by || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!phone) return { ok: false, message: 'That phone number is not valid.' };
+  if (!text) return { ok: false, message: 'Type a message first.' };
+  if (text.length > IB.MAX_TEXT) return { ok: false, message: 'Message is too long (max ' + IB.MAX_TEXT + ' characters).' };
+  var ctx = waContext_();
+  if (ctx.dncPhones[phone]) return { ok: false, message: 'This person opted out (Do Not Contact).' };
+  if (!ctx.live && !ctx.testNumbers[phone]) return { ok: false, message: 'Test mode: only the WhatsApp test numbers can receive messages.' };
+  var last = ibLastIncoming_(phone, cc);
+  if (!last || Date.now() - ibMs_(last) >= IB.WINDOW_MS) {
+    return { ok: false, closed: true, message: 'The 24-hour reply window is closed: WhatsApp only allows typed messages within 24 hours of their last message.' };
+  }
+  var setup = (ccBrand_(code) && waSetup_(code)) || null;
+  if (!setup || !setup.phoneId) CC.BRANDS.some(function (b) { var s = waSetup_(b[0]); if (s && s.phoneId) { setup = s; return true; } return false; });
+  var token = waToken_(code || 'ALL');
+  if (!setup || !setup.phoneId || !token) return { ok: false, message: 'WhatsApp is not set up (Phone Number ID / access token).' };
+  var res = waGraph_(setup.phoneId + '/messages', token, 'post', { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone,
+    type: 'text', text: { body: text, preview_url: false } });
+  var row = '';
+  if (ccBrand_(code)) {
+    mlReadDisplay_(ccSheet_(code), 3, 1, 15).some(function (r, i) { if (ibPhone_(r[14], cc) === phone) { row = String(i + 3); return true; } return false; });
+  }
+  var ok = res.code === 200 && res.body.messages && res.body.messages.length;
+  var err = ok ? '' : (res.body.error && res.body.error.code === 131047 ? 'The 24-hour reply window is closed.' : waClassifyError_(res.code, res.body).message);
+  var log = ccSheet_('WhatsApp Log');
+  waLogHeaders_(log);
+  if (String(log.getRange(1, 10).getValue()) !== 'Delivery') log.getRange(1, 10, 1, 2).setValues([['Delivery', 'Sent by']]).setFontWeight('bold');
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  log.appendRow([stamp, code, row, phone.slice(0, 4) + '****' + phone.slice(-3), '(reply)', ok ? 'Reply sent' : 'Reply failed',
+    ok ? res.body.messages[0].id : err, phone, text, '', by]);
+  ibTouch_();
+  return ok ? { ok: true, message: 'Sent', time: stamp } : { ok: false, message: err };
+}
+
+/** doPost ?action=add|send|optout|reply&key=  (JSON body). */
 function ibPost_(e) {
   var out;
   if (!dbKeyOk_(e.parameter.key)) out = { ok: false, message: 'unauthorized' };
@@ -288,6 +362,7 @@ function ibPost_(e) {
         var code = String(p.brand || '').toUpperCase(), row = Number(p.row) || 0;
         out = ccBrand_(code) && row >= 3 ? ibSendRow_(code, row) : { ok: false, message: 'Unknown row.' };
       } else if (a === 'optout') out = ibOptOut_(p);
+      else if (a === 'reply') out = ibReply_(p);
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };

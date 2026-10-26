@@ -667,3 +667,71 @@ test('inbox: add contact + send, duplicates, Do Not Contact, daily cap, opt-out,
   const capped = post('add', { brand: 'SB', phone: '9811100003', name: 'Next', send: true });
   assert.ok(capped.ok && !capped.sent && /Daily limit/.test(capped.message), JSON.stringify(capped));
 });
+
+test('reply: free text inside the 24-hour window, refused outside it, ticks per message, times normalised', () => {
+  const calls = [];
+  const fetch = (url, opts) => {
+    calls.push({ url, opts });
+    let code = 200, reply;
+    if (url.includes('message_templates')) reply = { data: [{ name: 'intro', language: 'en', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}' }] }] };
+    else if (url.includes('quality_rating')) reply = { quality_rating: 'GREEN' };
+    else if (opts && JSON.parse(opts.payload || '{}').to === '919811100077') { code = 400; reply = { error: { code: 131047, message: 'Re-engagement message' } }; }
+    else reply = { messages: [{ id: 'wamid.R' + calls.length }] };
+    return { getResponseCode: () => code, getContentText: () => JSON.stringify(reply) };
+  };
+  const { master, globals, g } = inboxMaster(fetch);
+  g.ccSetSetting_('WhatsApp live sending', 'Yes');
+  const ist = (msAgo) => g.Utilities.formatDate(new Date(Date.now() - msAgo), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  // times as the sheet may show them
+  assert.strictEqual(g.ibTime_('2026-10-23 9:05:12'), '2026-10-23 09:05:12');
+  assert.strictEqual(g.ibTime_('23-Oct-2026 9:05'), '2026-10-23 09:05:00');
+  assert.strictEqual(g.ibTime_(''), '');
+  assert.strictEqual(g.ibMs_('2026-10-23 05:30:00'), Date.UTC(2026, 9, 23, 0, 0, 0));
+
+  master.getSheetByName('SB').getRange(3, 1, 1, 15).setValues([['Rohit', 'r@x.com', '', '', '', '', '', '', '', '', '', '', '', '', '9811100001']]);
+  const rep = master.getSheetByName('WhatsApp Replies');
+  rep.getRange(2, 1, 4, 10).setValues([
+    [ist(3600 * 1000).replace(/ 0(\d):/, ' $1:'), 'SB', '3', 'Rohit', '919811100001', 'Interested', 'text', 'wamid.I1', 'PHONE_SB', ''],   // 1 h ago, hour without leading zero
+    [ist(30 * 3600 * 1000), 'SB', '', 'Old', '919811100002', 'Hello', 'text', 'wamid.I2', 'PHONE_SB', ''],                                 // 30 h ago
+    [ist(3600 * 1000), 'SB', '', 'Opted', '919811100003', 'stop', 'text', 'wamid.I3', 'PHONE_SB', 'Opted out'],
+    [ist(3600 * 1000), 'SB', '', 'Closed by Meta', '919811100077', 'hi', 'text', 'wamid.I4', 'PHONE_SB', '']]);
+  master.getSheetByName('Do Not Contact').getRange(2, 1, 1, 5).setValues([['', 'x', '', 'SB', '919811100003']]);
+  const post = (body) => JSON.parse(g.doPost({ parameter: { action: 'reply', key: 'k'.repeat(64) }, postData: { contents: JSON.stringify(body) } }).text);
+
+  const ok = post({ brand: 'SB', phone: '919811100001', text: '  Sure, calling you at 5 pm.\r\nThanks!  ', by: 'Rohit (team)' });
+  assert.ok(ok.ok, JSON.stringify(ok));
+  const sent = calls.find((c) => c.url.endsWith('PHONE_SB/messages'));
+  assert.deepStrictEqual(JSON.parse(sent.opts.payload).text, { body: 'Sure, calling you at 5 pm.\nThanks!', preview_url: false });
+  const log = master.getSheetByName('WhatsApp Log');
+  const row = log.getRange(log.getLastRow(), 1, 1, 11).getValues()[0];
+  assert.deepStrictEqual([row[1], row[2], row[4], row[5], row[7], row[8], row[10]],
+    ['SB', '3', '(reply)', 'Reply sent', '919811100001', 'Sure, calling you at 5 pm.\nThanks!', 'Rohit (team)']);
+  assert.strictEqual(log.getRange(1, 11).getValue(), 'Sent by');
+  // typed replies do not use up the brand's template limits
+  const allow = g.waAllowance_(log.getRange(2, 1, log.getLastRow() - 1, 7).getValues(), 'SB', ist(0), { perDay: 1, perHour: 0, gap: 0 });
+  assert.strictEqual(allow.allowed, 1);
+
+  assert.ok(post({ brand: 'SB', phone: '919811100002', text: 'hi' }).closed);         // 30 h: window closed
+  assert.match(post({ brand: 'SB', phone: '919811100003', text: 'hi' }).message, /opted out/);
+  assert.match(post({ brand: 'SB', phone: '919811100004', text: 'hi' }).message, /window is closed/);   // never wrote to us
+  assert.match(post({ brand: 'SB', phone: '919811100001', text: '   ' }).message, /Type a message/);
+  const meta = post({ brand: 'SB', phone: '919811100077', text: 'hi' });
+  assert.ok(!meta.ok && /window is closed/.test(meta.message));
+  assert.strictEqual(log.getRange(log.getLastRow(), 6).getValue(), 'Reply failed');
+  g.ccSetSetting_('WhatsApp live sending', 'No');
+  assert.match(post({ brand: 'SB', phone: '919811100001', text: 'hi' }).message, /Test mode/);
+
+  // Meta reports "read" for the typed reply -> that message gets its own blue ticks in the inbox
+  globals.__props.WA_HOOK_KEY = 'h'.repeat(64);
+  const id = row[6];
+  g.doPost({ parameter: { key: 'h'.repeat(64) }, postData: { contents: JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id, status: 'read', recipient_id: '919811100001', timestamp: '1792900000' }] } }] }] }) } });
+  assert.strictEqual(log.getRange(log.getLastRow() - 1, 10).getValue(), 'Read');
+  const data = JSON.parse(g.doGet({ parameter: { key: 'k'.repeat(64), inbox: 'all' } }).text);
+  const chat = data.chats.find((c) => c.id === 'SB|919811100001');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(chat.lastInTime), chat.lastInTime);
+  const mine = data.messages.filter((m) => m.chat === chat.id);
+  const out = mine.find((m) => m.kind === 'reply');
+  assert.deepStrictEqual([out.status, out.by, out.text], ['read', 'Rohit (team)', 'Sure, calling you at 5 pm.\nThanks!']);
+  assert.ok(mine.every((m, i) => i === 0 || mine[i - 1].time <= m.time));
+  assert.ok(typeof data.now === 'number');
+});

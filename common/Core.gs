@@ -241,7 +241,7 @@ function ccSetup() {
   if (was.created || was.sheet.getLastRow() < 2) {
     was.sheet.getRange(2, 1, CC.BRANDS.length, 6).setValues(CC.BRANDS.map(function (b) { return [b[0], '', '', '', 'en', 'A']; }));
   }
-  ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error', 'To', 'Text'], { text: true });
+  ccEnsureTab_('WhatsApp Log', ['Time', 'Brand', 'Row', 'Phone', 'Template', 'Result', 'Message ID / Error', 'To', 'Text', 'Delivery', 'Sent by'], { text: true });
   ccEnsureTab_('WhatsApp Replies', CC.WA_REPLY_HEADERS, { text: true });
 
   // Brand tabs + technical mail tabs
