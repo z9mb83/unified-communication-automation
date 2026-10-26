@@ -623,6 +623,9 @@ function waApplyWebhook_(parsed) {
     tabs[b[0]] = mlReadDisplay_(sh, 3, 1, CC.LEAD_HEADERS.length);
   });
 
+  // delivery per message (WhatsApp Log column J), so every typed reply in the inbox gets its own ticks
+  if (parsed.statuses.length) waLogDelivery_(parsed.statuses);
+
   // delivery updates for messages we sent (matched on the message ID in column T)
   parsed.statuses.forEach(function (st) {
     Object.keys(tabs).some(function (code) {
@@ -695,6 +698,22 @@ function waOptOutConfirm_(code, to, biz, lead) {
     log.appendRow([waStampFromEpoch_(0), code || '', lead ? String(lead.row) : '', to.slice(0, 4) + '****' + to.slice(-3), '(opt-out confirmation)',
       res.code === 200 ? 'Auto-reply' : 'Auto-reply failed', res.code === 200 ? ((res.body.messages || [{}])[0].id || '') : waClassifyError_(res.code, res.body).message, to, text]);
   } catch (e) { Logger.log('opt-out confirmation failed: ' + e.message); }
+}
+
+/** Writes Delivered / Read / Failed: reason into WhatsApp Log column J for the matching message ID (column G). */
+function waLogDelivery_(statuses) {
+  var log = ccSs_().getSheetByName('WhatsApp Log');
+  if (!log || log.getLastRow() < 2) return;
+  var first = Math.max(2, log.getLastRow() - 3000), n = log.getLastRow() - first + 1;
+  var ids = log.getRange(first, 7, n, 1).getDisplayValues(), cur = log.getRange(first, 10, n, 1).getDisplayValues();
+  statuses.forEach(function (st) {
+    for (var i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0]).trim() !== st.id) continue;
+      var label = waDeliveryLabel_(cur[i][0], st.status, st.error);
+      if (label && label !== cur[i][0]) { log.getRange(first + i, 10).setValue(label); cur[i][0] = label; }
+      break;
+    }
+  });
 }
 
 function waHookKeyOk_(given) {
