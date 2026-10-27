@@ -39,6 +39,9 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(eg.first_name("Mr. ARYAN Sharma"), "Aryan")
         self.assertEqual(eg.first_name("Acme Solutions Pvt Ltd"), "")
         self.assertEqual(eg.first_name(""), "")
+        self.assertEqual(eg.first_name("Amarjeetmvplchd"), "")          # handle, not a name
+        self.assertEqual(eg.first_name("Amarjeet Singh"), "Amarjeet")
+        self.assertEqual(eg.first_name("Christopher"), "Christopher")
 
     def test_briefs_vary(self):
         rng = random.Random(7)
@@ -79,6 +82,17 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(eg.spam_problems("ideas for your cafe", "We could help you learn more."), [])
         p = eg.spam_problems("Act Now", "- one\n- two\nhttps://x.com")
         self.assertTrue(any("bullet" in x for x in p) and any("link" in x for x in p) and any("spam words" in x for x in p))
+
+    def test_placeholders_are_caught(self):
+        for body in ["I'm [Name] from 99 Marketing Services.", "Hi {first_name}, quick note.", "We work in <City> too."]:
+            self.assertTrue(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
+        self.assertFalse(any("placeholder" in x for x in eg.spam_problems("ideas for your cafe", "I'm Ajay from 99 Marketing Services.")))
+        for body in ["I'm Alex from 99 Marketing Services.", "This is Sam at Skyline Capital.", "I'm Matt, and I help owners."]:
+            self.assertTrue(any("writer must be Ajay" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
+        for body in ["I'm Ajay from Skyline Capital.", "I'm reaching out because", "I'm writing from Mohali", "I am Ajay Veer from X."]:
+            self.assertFalse(any("writer must be" in x for x in eg.spam_problems("ideas for your cafe", body)), body)
+        brand = type("B", (), {"brand_name": "Skyline Capital", "brand_facts": "x"})()
+        self.assertIn("I'm Ajay from Skyline Capital", eg._instructions(brand))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@
 #   bash go_master.sh reports   deploy report changes only (10 AM / 6 PM emails); sender untouched, preview sends nothing
 #   bash go_master.sh regen-preview   show how many queued drafts would be rewritten + one sample (changes nothing)
 #   bash go_master.sh regen     rewrite queued, unsent drafts that are still in the old format (sends nothing)
+#   bash go_master.sh regen-brand-preview <brand> / regen-brand <brand>
+#                               rewrite ALL queued drafts of one brand, e.g. after its brand_facts changed (sends nothing)
 #   bash go_master.sh stop      pause both senders
 #   bash go_master.sh rollback  old sender back on (only safe if the new one has not sent yet)
 set -euo pipefail
@@ -74,8 +76,14 @@ PY
     gcloud scheduler jobs list --location $R --format='table(name.basename(),schedule,state)'
     echo "SWITCH DONE"
     ;;
-  regen-preview|regen)
-    ARGS="--regenerate-drafts,--limit,120"; [ "$1" = regen-preview ] && ARGS="$ARGS,--dry-run"
+  regen-preview|regen|regen-brand-preview|regen-brand)
+    ARGS="--regenerate-drafts,--limit,120"
+    case "$1" in *-preview) ARGS="$ARGS,--dry-run" ;; esac
+    if [[ "$1" == regen-brand* ]]; then
+      # Rewrite ALL queued drafts of one brand (after its facts/angles changed). Backup first; sends nothing.
+      [ -n "${2:-}" ] || { echo "usage: bash go_master.sh $1 <brand_id, e.g. skyline>"; exit 1; }
+      ARGS="$ARGS,--rewrite-since,$(TZ=Asia/Kolkata date +%Y-%m-%dT%H:%M)"
+    fi
     [ -n "${2:-}" ] && ARGS="$ARGS,--brand,$2"
     # regen repeats (up to 15 rounds of 120 drafts, small rounds keep memory low) until every old-format draft is rewritten.
     for ROUND in $(seq 1 15); do
@@ -84,7 +92,7 @@ PY
       OUT=$(gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
         --order=asc --freshness=2h --format='value(textPayload)' | grep -v '^$' | grep -v 'httplib2 transport')
       echo "$OUT"
-      [ "$1" = regen ] || break
+      case "$1" in regen|regen-brand) ;; *) break ;; esac
       if echo "$OUT" | grep -q 'sender is running right now'; then sleep 60; continue; fi
       echo "$OUT" | grep -q 'Run the same command again' || break
     done
