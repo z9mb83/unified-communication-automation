@@ -196,6 +196,45 @@ function dbReport_(ss, nowDate) {
   return { generatedAt: now, timezone: 'Asia/Kolkata', leads: out };
 }
 
+/* ============================== email replies (tracker) ============================== */
+
+/**
+ * The hidden "Mail Threads" tab, filled by the email sender every 15 minutes (mail/app/reply_sync.py):
+ * one row per outreach conversation that got an answer. Read-only, plus "handled" marks from the dashboard.
+ */
+var DB_MT = { TAB: 'Mail Threads', SYNC: 'Mail Sync', WIDTH: 16, HANDLED_COL: 14 };
+
+function dbMailThreads_(ss) {
+  var read = function (name, width) { var sh = ss.getSheetByName(name); return sh ? mlReadDisplay_(sh, 2, 1, width) : []; };
+  var t = function (v, n) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n || 200); };
+  var threads = read(DB_MT.TAB, DB_MT.WIDTH).filter(function (r) { return r[4] && r[5]; }).map(function (r) {
+    return { brand: t(r[0], 8), email: t(r[1], 120), name: t(r[2], 120), phone: t(r[3], 30), mailbox: t(r[4], 120),
+      threadId: t(r[5], 40), subject: t(r[6], 200), emailedAt: t(r[7], 16), firstReplyAt: t(r[8], 16), lastReplyAt: t(r[9], 16),
+      replies: Number(r[10]) || 0, lastFromUsAt: t(r[11], 16), status: t(r[12], 20), handledAt: t(r[13], 16),
+      handledBy: t(r[14], 60), updated: t(r[15], 16) };
+  });
+  var sync = read(DB_MT.SYNC, 4).filter(function (r) { return r[0]; })
+    .map(function (r) { return { mailbox: t(r[0], 120), lastCheck: t(r[2], 16), result: t(r[3], 120) }; });
+  return { generatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'), threads: threads, sync: sync };
+}
+
+/** Dashboard "Mark handled" / "Undo": p = {mailbox, threadId, handled: true|false, by}. */
+function dbMailHandled_(p) {
+  var sh = ccSs_().getSheetByName(DB_MT.TAB);
+  if (!sh || sh.getLastRow() < 2) return { ok: false, message: 'No email replies tracked yet.' };
+  var mailbox = String(p.mailbox || '').trim().toLowerCase(), id = String(p.threadId || '').trim();
+  var rows = sh.getRange(2, 5, sh.getLastRow() - 1, 2).getDisplayValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).trim().toLowerCase() === mailbox && String(rows[i][1]).trim() === id) {
+      var at = p.handled === false ? '' : Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm');
+      var by = p.handled === false ? '' : String(p.by || 'Dashboard').slice(0, 60);
+      sh.getRange(i + 2, DB_MT.HANDLED_COL, 1, 2).setNumberFormat('@').setValues([[at, by]]);
+      return { ok: true, handledAt: at };
+    }
+  }
+  return { ok: false, message: 'That conversation is not in the tracker.' };
+}
+
 /* ============================== web app ============================== */
 
 function dbKeyOk_(given) {
@@ -215,6 +254,9 @@ function doGet(e) {
   else if (e.parameter.inbox) {
     try { out = ibGet_(e.parameter); }
     catch (err) { out = { error: 'inbox failed: ' + String(err.message || err).slice(0, 200) }; }
+  } else if (e.parameter.mail === 'threads') {
+    try { out = dbMailThreads_(SpreadsheetApp.openById(CC_SHEET_ID_())); }
+    catch (err) { out = { error: 'mail threads failed: ' + String(err.message || err).slice(0, 200) }; }
   } else if (e.parameter.report === 'leads') {
     try { out = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date()); }
     catch (err) { out = { error: 'report failed: ' + String(err.message || err).slice(0, 200) }; }

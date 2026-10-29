@@ -82,6 +82,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--brand", choices=BRAND_ORDER)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--sync-replies", action="store_true",
+                        help="Only check the sending mailboxes for email replies (Mail Threads tab). Sends nothing.")
+    parser.add_argument("--budget", type=int, default=600, help="With --sync-replies: max seconds to spend.")
     parser.add_argument("--read-sheets", action="store_true", help="In dry-run mode, read live Sheets data read-only.")
     parser.add_argument("--generate-only", action="store_true", help="Generate drafts for one brand without any Gmail send request.")
     parser.add_argument("--regenerate-drafts", action="store_true",
@@ -92,6 +95,14 @@ def main() -> None:
     args = parser.parse_args()
     if args.rewrite_since and not (args.regenerate_drafts and args.brand):
         parser.error("--rewrite-since needs --regenerate-drafts and --brand")
+    if args.sync_replies:
+        # Manual reply check (also the first, larger check after deploy). Sends nothing.
+        with _run_lock() as acquired:
+            if not acquired:
+                print("The sender is running right now - try again in a minute.")
+                return
+            _reply_check(dry_run=args.dry_run, budget=args.budget)
+        return
     if args.regenerate_drafts:
         _regenerate(args)
         return
@@ -110,6 +121,13 @@ def main() -> None:
             read_sheets=args.read_sheets,
             generate_only=args.generate_only,
         )
+        if not args.dry_run and not args.generate_only and not args.brand:
+            # Every 15 minutes: look for new email replies (never sends; a failure never affects sending).
+            try:
+                if _reply_check_due():
+                    _reply_check(budget=90)
+            except Exception as error:
+                print(f"reply check failed: {type(error).__name__}")
 
     for result in results:
         print(
@@ -120,6 +138,30 @@ def main() -> None:
             print(f"  dry-run: {note}")
         for error in result.errors:
             print(f"  error: {error}")
+
+
+def _reply_check_due() -> bool:
+    from datetime import datetime
+
+    from app.reply_sync import due
+    from app.utilities import timezone_for
+
+    return due(datetime.now(timezone_for(load_runtime_config().timezone)))
+
+
+def _reply_check(dry_run: bool = False, budget: int = 90) -> None:
+    from datetime import datetime
+
+    from app.gmail_client import gmail_service
+    from app.reply_sync import sync_replies
+    from app.sheet_client import SheetClient
+    from app.utilities import timezone_for
+
+    runtime = load_runtime_config()
+    brands = load_all_brand_configs(enabled_only=True)
+    now = datetime.now(timezone_for(runtime.timezone))
+    print(sync_replies(brands, lambda sid: SheetClient(sid, dry_run=dry_run), gmail_service, now,
+                       budget_seconds=budget, dry_run=dry_run))
 
 
 def _regenerate(args) -> None:

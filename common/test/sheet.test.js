@@ -741,3 +741,31 @@ test('reply: free text inside the 24-hour window, refused outside it, ticks per 
   assert.ok(mine.every((m, i) => i === 0 || mine[i - 1].time <= m.time));
   assert.ok(typeof data.now === 'number');
 });
+
+test('email reply tracker: Mail Threads feed and Mark handled', () => {
+  const { master, g } = inboxMaster(() => { throw new Error('no fetch expected'); });
+  const key = 'k'.repeat(64);
+  const feed = () => JSON.parse(g.doGet({ parameter: { key, mail: 'threads' } }).text);
+  assert.deepStrictEqual(feed().threads, []);                       // no tab yet: empty, not an error
+  assert.strictEqual(JSON.parse(g.doGet({ parameter: { key: 'bad', mail: 'threads' } }).text).error, 'unauthorized');
+  const mt = master.insertSheet('Mail Threads');
+  mt.getRange(1, 1, 3, 16).setValues([
+    ['Brand', 'Lead email', 'Name', 'Phone', 'Mailbox', 'Thread ID', 'Subject', 'We emailed at', 'First reply at', 'Last reply at', 'Replies', 'Last from us at', 'Status', 'Handled at', 'Handled by', 'Updated'],
+    ['SB', 'riya@x.com', 'Riya', '9811122233', 'box@gmail.com', '18abc', 'Hello', '2026-10-20 11:00', '2026-10-21 09:30', '2026-10-21 09:30', '1', '', 'Waiting for us', '', '', '2026-10-29 10:00'],
+    ['PE', 'raj@y.com', '', '', 'box2@gmail.com', '18def', 'Hi', '2026-10-20 11:00', '2026-10-20 11:05', '2026-10-20 11:05', '0', '', 'Auto-reply', '', '', '2026-10-29 10:00']]);
+  master.insertSheet('Mail Sync').getRange(1, 1, 2, 4).setValues([['Mailbox', 'History ID', 'Last check', 'Result'], ['box@gmail.com', '500', '2026-10-29 10:00', 'OK']]);
+  const f = feed();
+  assert.strictEqual(f.threads.length, 2);
+  assert.deepStrictEqual([f.threads[0].email, f.threads[0].status, f.threads[0].replies, f.threads[0].threadId], ['riya@x.com', 'Waiting for us', 1, '18abc']);
+  assert.deepStrictEqual(f.sync, [{ mailbox: 'box@gmail.com', lastCheck: '2026-10-29 10:00', result: 'OK' }]);
+
+  const post = (body) => JSON.parse(g.doPost({ parameter: { action: 'mailhandled', key }, postData: { contents: JSON.stringify(body) } }).text);
+  const ok = post({ mailbox: 'BOX@gmail.com', threadId: '18abc', by: 'Dashboard' });
+  assert.ok(ok.ok, JSON.stringify(ok));
+  assert.strictEqual(mt.getRange(2, 15).getValue(), 'Dashboard');
+  assert.ok(mt.getRange(2, 14).getValue());
+  assert.strictEqual(mt.getRange(3, 14).getValue(), '');             // other rows untouched
+  assert.ok(post({ mailbox: 'box@gmail.com', threadId: '18abc', handled: false }).ok);
+  assert.deepStrictEqual([mt.getRange(2, 14).getValue(), mt.getRange(2, 15).getValue()], ['', '']);
+  assert.match(post({ mailbox: 'box@gmail.com', threadId: 'nope' }).message, /not in the tracker/);
+});

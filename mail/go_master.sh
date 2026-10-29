@@ -9,6 +9,9 @@
 #   bash go_master.sh regen     rewrite queued, unsent drafts that are still in the old format (sends nothing)
 #   bash go_master.sh regen-brand-preview <brand> / regen-brand <brand>
 #                               rewrite ALL queued drafts of one brand, e.g. after its brand_facts changed (sends nothing)
+#   bash go_master.sh replies-preview   email reply check, preview only (reads Gmail metadata + sheet, writes nothing)
+#   bash go_master.sh replies   email reply check now (fills the hidden "Mail Threads" tab; sends nothing).
+#                               The sender also does this by itself every 15 minutes during sending hours.
 #   bash go_master.sh stop      pause both senders
 #   bash go_master.sh rollback  old sender back on (only safe if the new one has not sent yet)
 set -euo pipefail
@@ -127,6 +130,14 @@ PY
     gcloud run jobs execute email-report-evening --region $R --args=--slot=evening,--dry-run --wait
     echo "REPORTS DONE ($REPORTS)"
     ;;
+  replies-preview|replies)
+    ARGS="--sync-replies,--budget,600"
+    [ "$1" = replies-preview ] && ARGS="$ARGS,--dry-run"
+    EXEC=$(gcloud run jobs execute email-sender-master --region $R --args="$ARGS" --wait --format='value(metadata.name)')
+    sleep 20
+    gcloud logging read "resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXEC\"" \
+      --order=asc --freshness=2h --format='value(textPayload)' | grep -v '^$' | grep -v 'httplib2 transport'
+    ;;
   stop)
     gcloud scheduler jobs pause $NEW_TRIGGER --location $R || true
     gcloud scheduler jobs pause $OLD_TRIGGER --location $R || true
@@ -140,5 +151,5 @@ PY
     done
     echo "ROLLED BACK"
     ;;
-  *) echo "usage: bash go_master.sh prepare|pause|switch|stop|rollback"; exit 1 ;;
+  *) echo "usage: bash go_master.sh prepare|pause|switch|sender|reports|replies-preview|replies|stop|rollback"; exit 1 ;;
 esac
