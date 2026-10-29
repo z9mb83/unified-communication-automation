@@ -149,6 +149,12 @@ test('setup + import from the old sheet (old sheet is only read)', () => {
   assert.deepStrictEqual(mb.slice(2, 7), ['No', '5', '2', 'Stage 2', 'Yes']);
   assert.strictEqual(ctl.getRange('F13').getValue(), '1');
   assert.strictEqual(ctl.getRange('B6').getValue(), 'info@99marketingservices.com');
+  // a Cc cleared on purpose stays blank when setup runs again (blank = no Cc)
+  ctl.getRange('B6').setValue('');
+  g.ccSetup();
+  assert.strictEqual(ctl.getRange('B6').getValue(), '');
+  assert.ok(String(ctl.getRange('C6').getValue()).length > 0, 'C6 note keeps the row readable by the sender');
+  ctl.getRange('B6').setValue('info@99marketingservices.com');
 
   // importing twice does not duplicate anything (including old rows that have no email)
   old.getSheetByName('99marketing').getRange(6, 1, 1, 14).setValues([['No email lead', '', 'note', '', '', '', '', '', '', '', '', '', '', '']]);
