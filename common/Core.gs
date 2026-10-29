@@ -293,15 +293,16 @@ function ccSetupBrand_(b) {
 
   // Mail Control <code>: settings rows A2:C10 read by the mail tool; values follow the Limits tab.
   var lr = 2 + ccBrandIndex_(code);            // Mail row in Limits
-  var ctl = ccEnsureTab_('Mail Control ' + code, null, { hidden: true }).sheet;
-  var existingCc = ctl.getRange('B6').getDisplayValue();
+  var ctlTab = ccEnsureTab_('Mail Control ' + code, null, { hidden: true }), ctl = ctlTab.sheet;
+  // Cc: the brand default only when the tab is new; a value cleared on purpose stays blank (= no Cc)
+  var existingCc = ctlTab.created ? b[7] : ctl.getRange('B6').getDisplayValue();
   ctl.getRange('A1:C10').setValues([
     ['Setting', 'Value', 'Notes'],
     ['Default hourly limit', ctl.getRange('B2').getDisplayValue() || '1', 'Used when a mailbox hourly limit is blank'],
     ['Default daily limit', ctl.getRange('B3').getDisplayValue() || '3', 'Used when a mailbox daily limit is blank'],
     ['Sending start time', '=IF(Limits!G' + lr + '="","10:00",Limits!G' + lr + ')', 'From the Limits tab'],
     ['Sending end time', '=IF(Limits!H' + lr + '="","18:00",Limits!H' + lr + ')', 'From the Limits tab'],
-    ['Cc email', existingCc || b[7], 'Optional visible Cc for every email'],
+    ['Cc email', existingCc, 'Optional visible Cc for every email (blank = no Cc)'],
     ['Minimum sending gap', '=IF(Limits!F' + lr + '="","",Limits!F' + lr + ')', 'From the Limits tab (minutes)'],
     ['Brand max per day', '=IF(Limits!D' + lr + '="","",Limits!D' + lr + ')', 'From the Limits tab'],
     ['Emergency stop', '=IF(Limits!C' + lr + '="Yes","No","Yes")', 'Mail On = No in Limits stops this brand'],
