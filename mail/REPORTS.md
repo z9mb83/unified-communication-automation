@@ -20,6 +20,11 @@ Timezone: Asia/Kolkata
   lead tab: column M "Replied" = Yes and column N "Replied At". Only M:N are written (headers
   in row 2 are added if missing); A:L are never changed. Once marked, a row stays marked.
   Dry-run only prints how many replied leads were found.
+- Live reply tracker (since 2026-10-29): the sender checks every sending mailbox every 15 minutes
+  during its runs (Gmail history, metadata only), keeps one row per answered outreach conversation in
+  the hidden tab "Mail Threads" (Waiting for us / Answered / Auto-reply / Bounce; "Handled" set from the
+  dashboard) and marks new replies in M:N at once. Per-mailbox state: hidden tab "Mail Sync".
+  Commands: `bash go_master.sh replies-preview` / `bash go_master.sh replies` (first full check).
 - Replies are matched from metadata in original Gmail conversations, including older
   outreach. New/unrelated threads and replies delivered only to external CC mailboxes
   are not covered. Reply bodies are not read with the existing gmail.metadata scope.

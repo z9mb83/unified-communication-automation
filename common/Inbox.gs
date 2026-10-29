@@ -363,6 +363,7 @@ function ibPost_(e) {
         out = ccBrand_(code) && row >= 3 ? ibSendRow_(code, row) : { ok: false, message: 'Unknown row.' };
       } else if (a === 'optout') out = ibOptOut_(p);
       else if (a === 'reply') out = ibReply_(p);
+      else if (a === 'mailhandled') out = dbMailHandled_(p);
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };
