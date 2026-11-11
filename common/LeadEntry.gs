@@ -90,15 +90,21 @@ function leAddAllNow() {
 function leSelection_(sh, kind) {
   var what = leWhich_(sh.getName());
   if (!what || what.kind !== kind) return null;
-  var refCol = kind === 'Mail' ? LE.MAIL_ROWREF_COL : LE.WA_ROWREF_COL, seen = {}, rows = [];
+  var refCol = kind === 'Mail' ? LE.MAIL_ROWREF_COL : LE.WA_ROWREF_COL, seen = {}, rows = [], yellowOnly = false;
+  var yellowEnd = (kind === 'Mail' ? LE.MAIL.width : LE.WA.width) + 1;          // entry columns + grey divider
   sh.getActiveRangeList().getRanges().forEach(function (r) {
     var top = Math.max(2, r.getRow()), bottom = r.getLastRow();
     if (bottom < top) return;
+    if (r.getLastColumn() <= yellowEnd) { yellowOnly = true; return; }          // yellow rows are not the list rows
+    yellowOnly = false;
     sh.getRange(top, refCol, bottom - top + 1, 1).getValues().forEach(function (v) {
       var n = Number(v[0]);
       if (n >= LE.FIRST_LEAD_ROW && !seen[n]) { seen[n] = true; rows.push(n); }
     });
   });
+  if (!rows.length && yellowOnly) {
+    SpreadsheetApp.getUi().alert('Select the rows in the WHITE list on the right (the people to send to), not the yellow entry columns.');
+  }
   return { sheet: sh.getParent().getSheetByName(what.brand), code: what.brand, rows: rows.sort(function (a, b) { return a - b; }) };
 }
 
