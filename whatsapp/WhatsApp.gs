@@ -175,8 +175,10 @@ function waForceCheck_(row, ctx) {
 
 function waSendSelected() {
   var sh = ccSs_().getActiveSheet(), code = sh.getName();
-  if (!ccBrand_(code)) { ccAlert_('Open a brand tab (SB, 99M, 99S, PE or SC) and select the rows first.'); return; }
-  var rows = mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
+  var via = typeof leSelection_ === 'function' ? leSelection_(sh, 'WhatsApp') : null;   // rows selected in "<BRAND> WhatsApp"
+  if (via) { sh = via.sheet; code = via.code; }
+  if (!ccBrand_(code)) { ccAlert_('Open a WhatsApp tab (e.g. SB WhatsApp) and select the rows first.'); return; }
+  var rows = via ? via.rows : mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
   var max = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
   if (!rows.length) { ccAlert_('Select one or more rows (row 3 and below).'); return; }
   if (rows.length > max) { ccAlert_('Select at most ' + max + ' rows at a time (you selected ' + rows.length + ').'); return; }

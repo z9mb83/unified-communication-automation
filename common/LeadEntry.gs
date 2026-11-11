@@ -77,6 +77,26 @@ function leAddAllNow() {
   });
 }
 
+/**
+ * Used by "Send mail / WhatsApp to selected rows" when the rows are selected in "<BRAND> Mail" or
+ * "<BRAND> WhatsApp": returns the brand tab and its row numbers (from the "Row in <BRAND> tab" column),
+ * or null when the active tab is not one of these.
+ */
+function leSelection_(sh, kind) {
+  var what = leWhich_(sh.getName());
+  if (!what || what.kind !== kind) return null;
+  var refCol = kind === 'Mail' ? LE.MAIL_ROWREF_COL : LE.WA_ROWREF_COL, seen = {}, rows = [];
+  sh.getActiveRangeList().getRanges().forEach(function (r) {
+    var top = Math.max(2, r.getRow()), bottom = r.getLastRow();
+    if (bottom < top) return;
+    sh.getRange(top, refCol, bottom - top + 1, 1).getValues().forEach(function (v) {
+      var n = Number(v[0]);
+      if (n >= LE.FIRST_LEAD_ROW && !seen[n]) { seen[n] = true; rows.push(n); }
+    });
+  });
+  return { sheet: sh.getParent().getSheetByName(what.brand), code: what.brand, rows: rows.sort(function (a, b) { return a - b; }) };
+}
+
 function leWhich_(name) {
   var m = /^(SB|99M|99S|PE|SC) (Mail|WhatsApp)$/.exec(String(name || ''));
   return m ? { brand: m[1], kind: m[2] } : null;

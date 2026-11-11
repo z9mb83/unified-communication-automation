@@ -210,8 +210,10 @@ function mlSendCheck_(row, dnc, queued) {
 
 function mlSendSelected() {
   var sh = ccSs_().getActiveSheet(), code = sh.getName();
-  if (!ccBrand_(code)) { ccAlert_('Open a brand tab (SB, 99M, 99S, PE or SC) and select the lead rows first.'); return; }
-  var rows = mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
+  var via = typeof leSelection_ === 'function' ? leSelection_(sh, 'Mail') : null;        // rows selected in "<BRAND> Mail"
+  if (via) { sh = via.sheet; code = via.code; }
+  if (!ccBrand_(code)) { ccAlert_('Open a Mail tab (e.g. SB Mail) and select the lead rows first.'); return; }
+  var rows = via ? via.rows : mlSelectedRows_(sh.getActiveRangeList().getRanges().map(function (r) { return { row: r.getRow(), count: r.getNumRows() }; }));
   if (!rows.length) { ccAlert_('Select one or more lead rows (row 3 and below).'); return; }
   if (rows.length > ML_SEND.MAX) { ccAlert_('Select at most ' + ML_SEND.MAX + ' rows at a time (you selected ' + rows.length + ').'); return; }
   var lim = ccLimits_(code, 'Mail');
