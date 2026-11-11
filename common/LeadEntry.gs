@@ -193,7 +193,7 @@ function leProcess_(sh, what, first, last) {
       if (!(isMail ? d.email : d.phoneRaw)) return;
       var setResult = function (t) { sh.getRange(row, cfg.result + 1).setValue(t); };
 
-      var done = /^Added to .* row (\d+)/.exec(result);
+      var done = /^(?:Added to|Updated) .*? row (\d+)/.exec(result);
       if (done) {                                    // already added: keep the brand row in step with edits here
         var tr = Number(done[1]);
         if (d.email && !leEmailOk_(d.email)) d.email = '';
@@ -205,7 +205,7 @@ function leProcess_(sh, what, first, last) {
         fill(tr, d, 'sync');
         return;
       }
-      if (result) return;                            // not added earlier: staff clear the Result to retry
+      // a row that was "Not added" is checked again on every edit (e.g. after fixing the number or picking Yes)
 
       var msg = '';
       if (d.email && !leEmailOk_(d.email)) msg = 'Not added: email looks wrong';
@@ -220,7 +220,11 @@ function leProcess_(sh, what, first, last) {
       var mainFree = function (rr) { return isMail ? !emailAt[rr] : !phoneAt[rr]; };
 
       if (main) {                                    // this email / phone is already a lead
-        if (otherGiven && !other && otherFree(main)) {
+        if (!isMail && (d.send || d.consent) && !otherGiven) {     // number already a lead: apply the Yes/No picked here
+          tab.getRange(main, C.SEND, 1, 2).setValues([[d.send, d.consent]]);
+          setResult('Updated ' + what.brand + ' row ' + main + ' (number was already there): Send WhatsApp ' + (d.send || '-') + ', consent ' + (d.consent || '-'));
+          added++;
+        } else if (otherGiven && !other && otherFree(main)) {
           fill(main, d, 'join');
           setResult('Added to ' + what.brand + ' row ' + main + ' (joined: ' + (isMail ? 'phone' : 'email') + ' added to existing lead, ' + when + ')');
           added++;
