@@ -15,8 +15,36 @@ var LE = {
   BRANDS: ['SB', '99M', '99S', 'PE', 'SC'],
   MAIL: { width: 4, key: 1, result: 3 },          // 0-based: key column = Email, result column = D
   WA: { width: 5, key: 1, result: 4 },            // key = Phone, result = E
-  FIRST_LEAD_ROW: 3                               // brand tabs: row 1 = sender, row 2 = headers
+  FIRST_LEAD_ROW: 3,                              // brand tabs: row 1 = sender, row 2 = headers
+  // action columns right of the live view: picking Yes/No copies it to the brand tab row shown in the view
+  MAIL_APPROVE_COL: 20, MAIL_ROWREF_COL: 19,      // T "Approve" -> brand column J; S = "Row in <BRAND> tab"
+  WA_SEND_COL: 19, WA_ROWREF_COL: 18              // S "Send WhatsApp" -> brand columns P and Q; R = row ref
 };
+
+/** Approve (Mail) or Send WhatsApp + consent (WhatsApp) for rows already in the list. */
+function leAction_(sh, what, first, last) {
+  var isMail = what.kind === 'Mail';
+  var actCol = isMail ? LE.MAIL_APPROVE_COL : LE.WA_SEND_COL, refCol = isMail ? LE.MAIL_ROWREF_COL : LE.WA_ROWREF_COL;
+  var n = last - first + 1;
+  var picks = sh.getRange(first, actCol, n, 1).getValues(), refs = sh.getRange(first, refCol, n, 1).getValues();
+  var tab = sh.getParent().getSheetByName(what.brand), done = 0;
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(20000)) { SpreadsheetApp.getActive().toast('Busy, try again in a moment.', what.kind, 5); return; }
+  try {
+    picks.forEach(function (p, i) {
+      var v = leYes_(p[0]), row = Number(refs[i][0]);
+      if (!v || !(row >= LE.FIRST_LEAD_ROW)) return;
+      if (isMail) tab.getRange(row, 10).setValue(v);                    // J  Approve email (Yes)
+      else tab.getRange(row, 16, 1, 2).setValues([[v, v]]);              // P  Send WhatsApp, Q consent
+      done++;
+    });
+    sh.getRange(first, actCol, n, 1).clearContent();                    // the view column shows the new value
+    SpreadsheetApp.flush();
+    if (done) SpreadsheetApp.getActive().toast(done + (isMail ? ' email(s) updated: Approved' : ' number(s) updated: Send WhatsApp'), what.kind, 4);
+  } finally {
+    lock.releaseLock();
+  }
+}
 
 function onEdit(e) {
   try {
@@ -24,8 +52,14 @@ function onEdit(e) {
     var sh = e.range.getSheet(), what = leWhich_(sh.getName());
     if (!what) return;
     var cfg = what.kind === 'Mail' ? LE.MAIL : LE.WA;
-    if (e.range.getColumn() > cfg.width || e.range.getLastRow() < 2) return;   // only the yellow columns
+    if (e.range.getLastRow() < 2) return;
     var first = Math.max(2, e.range.getRow()), last = e.range.getLastRow();
+    var actionCol = what.kind === 'Mail' ? LE.MAIL_APPROVE_COL : LE.WA_SEND_COL;
+    if (e.range.getColumn() <= actionCol && e.range.getLastColumn() >= actionCol) {
+      leAction_(sh, what, first, last);                                          // Approve / Send WhatsApp column
+      return;
+    }
+    if (e.range.getColumn() > cfg.width) return;                                // only the yellow entry columns
     leProcess_(sh, what, first, last);
   } catch (err) {
     try { SpreadsheetApp.getActive().toast(String(err.message || err), 'Add lead', 8); } catch (ignore) {}
