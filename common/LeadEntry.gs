@@ -1,24 +1,29 @@
 /**
  * LEAD ENTRY (added 2026-11-11)
  * Staff add leads in the yellow columns on the left of "<BRAND> Mail" and "<BRAND> WhatsApp".
- * Each new row is copied into the brand tab (SB, 99M, 99S, PE, SC) that the mail sender, the WhatsApp
+ * Each entry is written into the brand tab (SB, 99M, 99S, PE, SC) that the mail sender, the WhatsApp
  * script and the dashboard read, so nothing else in the system changes. The right-hand side of those
  * tabs is a live view (formulas) and is never written by this script.
  *
- *   <BRAND> Mail      A Name | B Email | C Details | D Result
- *   <BRAND> WhatsApp  A Name | B Phone | C Send WhatsApp | D Consent | E Result
+ *   <BRAND> Mail      A Name | B Email | C Details | D Phone (optional) | E Result
+ *   <BRAND> WhatsApp  A Name | B Phone | C Send WhatsApp | D Consent | E Email (optional) | F Result
+ *
+ * One person = one brand-tab row: when an entry has both an email and a phone, or matches a lead that
+ * already has the other one, the two are joined in the same row, so that person shows in both tabs.
  *
  * Runs by itself on every edit (simple onEdit trigger, nothing to authorise). leAddAllNow() does the
  * same for every tab and can be run from the editor (e.g. after a big paste).
  */
 var LE = {
   BRANDS: ['SB', '99M', '99S', 'PE', 'SC'],
-  MAIL: { width: 4, key: 1, result: 3 },          // 0-based: key column = Email, result column = D
-  WA: { width: 5, key: 1, result: 4 },            // key = Phone, result = E
+  // entry columns (0-based inside the yellow block)
+  MAIL: { width: 5, name: 0, email: 1, details: 2, phone: 3, send: -1, consent: -1, result: 4, key: 'email' },
+  WA: { width: 6, name: 0, phone: 1, send: 2, consent: 3, email: 4, details: -1, result: 5, key: 'phone' },
   FIRST_LEAD_ROW: 3,                              // brand tabs: row 1 = sender, row 2 = headers
+  COL: { NAME: 1, EMAIL: 2, DETAILS: 3, APPROVE: 10, PHONE: 15, SEND: 16, CONSENT: 17 },   // brand tab columns
   // action columns right of the live view: picking Yes/No copies it to the brand tab row shown in the view
-  MAIL_APPROVE_COL: 20, MAIL_ROWREF_COL: 19,      // T "Approve" -> brand column J; S = "Row in <BRAND> tab"
-  WA_SEND_COL: 19, WA_ROWREF_COL: 18              // S "Send WhatsApp" -> brand columns P and Q; R = row ref
+  MAIL_APPROVE_COL: 21, MAIL_ROWREF_COL: 20,      // U "Approve" -> brand column J; T = "Row in <BRAND> tab"
+  WA_SEND_COL: 20, WA_ROWREF_COL: 19              // T "Send WhatsApp" -> brand columns P and Q; S = row ref
 };
 
 /** Approve (Mail) or Send WhatsApp + consent (WhatsApp) for rows already in the list. */
@@ -34,8 +39,8 @@ function leAction_(sh, what, first, last) {
     picks.forEach(function (p, i) {
       var v = leYes_(p[0]), row = Number(refs[i][0]);
       if (!v || !(row >= LE.FIRST_LEAD_ROW)) return;
-      if (isMail) tab.getRange(row, 10).setValue(v);                    // J  Approve email (Yes)
-      else tab.getRange(row, 16, 1, 2).setValues([[v, v]]);              // P  Send WhatsApp, Q consent
+      if (isMail) tab.getRange(row, LE.COL.APPROVE).setValue(v);
+      else tab.getRange(row, LE.COL.SEND, 1, 2).setValues([[v, v]]);
       done++;
     });
     sh.getRange(first, actCol, n, 1).clearContent();                    // the view column shows the new value
@@ -112,90 +117,134 @@ function leYes_(v) {
   return s === 'yes' || s === 'y' ? 'Yes' : s === 'no' || s === 'n' ? 'No' : '';
 }
 
-function leProcess_(sh, what, first, last) {
-  var isMail = what.kind === 'Mail', cfg = isMail ? LE.MAIL : LE.WA;
-  var entries = sh.getRange(first, 1, last - first + 1, cfg.width).getValues();
-  // "+91 98765 43210" typed into a cell becomes a formula (#ERROR!): take the typed text back as plain text
-  var keyCell = sh.getRange(first, cfg.key + 1, entries.length, 1), formulas = keyCell.getFormulas();
-  formulas.forEach(function (f, i) {
+function leEmailOk_(e) { return /^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i.test(e); }
+function lePhoneOk_(p) { var d = String(p).replace(/\D/g, ''); return !!leKey10_(p) && d.length <= 15; }
+
+/** "+91 98765 43210" typed into a cell becomes a formula (#ERROR!): take the typed text back as plain text. */
+function leFixTypedPhones_(sh, first, col0, entries) {
+  sh.getRange(first, col0 + 1, entries.length, 1).getFormulas().forEach(function (f, i) {
     if (!f[0]) return;
     var typed = String(f[0]).replace(/^=\s*/, '');
     if (/^[+\d\s().-]+$/.test(typed)) {
-      entries[i][cfg.key] = typed;
-      sh.getRange(first + i, cfg.key + 1).setNumberFormat('@').setValue(typed);
+      entries[i][col0] = typed;
+      sh.getRange(first + i, col0 + 1).setNumberFormat('@').setValue(typed);
     }
   });
-  if (!entries.some(function (r) { return String(r[cfg.key]).trim(); })) return;
+}
+
+function leProcess_(sh, what, first, last) {
+  var isMail = what.kind === 'Mail', cfg = isMail ? LE.MAIL : LE.WA, C = LE.COL;
+  var entries = sh.getRange(first, 1, last - first + 1, cfg.width).getValues();
+  leFixTypedPhones_(sh, first, cfg.phone, entries);
+  if (!entries.some(function (r) { return String(r[cfg[cfg.key]]).trim(); })) return;
 
   var lock = LockService.getDocumentLock();
   if (!lock.tryLock(20000)) { SpreadsheetApp.getActive().toast('Busy, try again in a moment.', 'Add lead', 5); return; }
   try {
     var ss = sh.getParent(), tab = ss.getSheetByName(what.brand);
     if (!tab) throw new Error('Tab ' + what.brand + ' not found');
-    var lastRow = Math.max(tab.getLastRow(), LE.FIRST_LEAD_ROW - 1);
-    var n = lastRow - LE.FIRST_LEAD_ROW + 1;
-    // existing keys in the brand tab: email (column B) or phone (column O) -> row
-    var existing = {};
+    var lastRow = Math.max(tab.getLastRow(), LE.FIRST_LEAD_ROW - 1), n = lastRow - LE.FIRST_LEAD_ROW + 1;
+
+    // what the brand tab already has: email -> row, phone -> row, and per row whether it has an email / phone
+    var byEmail = {}, byPhone = {}, emailAt = {}, phoneAt = {};
     if (n > 0) {
-      var col = isMail ? 2 : 15;
-      tab.getRange(LE.FIRST_LEAD_ROW, col, n, 1).getDisplayValues().forEach(function (r, i) {
-        var k = isMail ? String(r[0]).trim().toLowerCase() : leKey10_(r[0]);
-        if (k && !existing[k]) existing[k] = LE.FIRST_LEAD_ROW + i;
-      });
+      var emails = tab.getRange(LE.FIRST_LEAD_ROW, C.EMAIL, n, 1).getDisplayValues();
+      var phones = tab.getRange(LE.FIRST_LEAD_ROW, C.PHONE, n, 1).getDisplayValues();
+      for (var i = 0; i < n; i++) {
+        var row = LE.FIRST_LEAD_ROW + i, em = String(emails[i][0]).trim().toLowerCase(), pk = leKey10_(phones[i][0]);
+        if (em) { emailAt[row] = em; if (!byEmail[em]) byEmail[em] = row; }
+        if (pk) { phoneAt[row] = pk; if (!byPhone[pk]) byPhone[pk] = row; }
+      }
     }
     // Do Not Contact: email in A, phone in E
-    var dnc = {}, dsh = ss.getSheetByName('Do Not Contact');
+    var dncE = {}, dncP = {}, dsh = ss.getSheetByName('Do Not Contact');
     if (dsh && dsh.getLastRow() > 1) {
       dsh.getRange(2, 1, dsh.getLastRow() - 1, 5).getDisplayValues().forEach(function (r) {
-        var k = isMail ? String(r[0]).trim().toLowerCase() : leKey10_(r[4]);
-        if (k) dnc[k] = true;
+        var e = String(r[0]).trim().toLowerCase(), p = leKey10_(r[4]);
+        if (e) dncE[e] = true;
+        if (p) dncP[p] = true;
       });
     }
 
     var when = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM HH:mm');
-    var added = 0, skipped = 0, updated = 0, nextRow = lastRow + 1;
+    var added = 0, skipped = 0, nextRow = lastRow + 1;
+    var get = function (r, k) { return cfg[k] >= 0 ? r[cfg[k]] : ''; };
+
+    // writes what the entry has into a brand row; existing email/phone/details are never overwritten
+    // mode: 'new' row, 'join' into an existing lead (fills blanks only), 'sync' an entry added earlier
+    var fill = function (row, d, mode) {
+      if (row > tab.getMaxRows()) tab.insertRowsAfter(tab.getMaxRows(), 500);
+      if (String(d.name).trim() && (mode !== 'join' || !String(tab.getRange(row, C.NAME).getValue()).trim())) tab.getRange(row, C.NAME).setValue(d.name);
+      if (d.email && !emailAt[row]) { tab.getRange(row, C.EMAIL).setValue(d.email); emailAt[row] = d.email; byEmail[d.email] = row; }
+      if (d.details && (mode !== 'join' || !String(tab.getRange(row, C.DETAILS).getValue()).trim())) tab.getRange(row, C.DETAILS).setValue(d.details);
+      if (d.phoneRaw && !phoneAt[row]) {
+        tab.getRange(row, C.PHONE).setNumberFormat('@').setValue(d.phoneRaw); phoneAt[row] = d.phone; byPhone[d.phone] = row;
+      }
+      if (d.send || d.consent) tab.getRange(row, C.SEND, 1, 2).setValues([[d.send, d.consent]]);
+    };
+
     entries.forEach(function (r, i) {
-      var keyRaw = String(r[cfg.key]).trim(), result = String(r[cfg.result]).trim(), row = first + i;
-      if (!keyRaw) return;
+      var row = first + i, result = String(r[cfg.result]).trim();
+      var d = {
+        name: get(r, 'name'), email: String(get(r, 'email')).trim().toLowerCase(), details: get(r, 'details'),
+        phoneRaw: String(get(r, 'phone')).trim(), send: leYes_(get(r, 'send')), consent: leYes_(get(r, 'consent'))
+      };
+      d.phone = leKey10_(d.phoneRaw);
+      if (!(isMail ? d.email : d.phoneRaw)) return;
+      var setResult = function (t) { sh.getRange(row, cfg.result + 1).setValue(t); };
+
       var done = /^Added to .* row (\d+)/.exec(result);
-      if (done) {                                   // already added: keep name/details/Yes columns in step
+      if (done) {                                    // already added: keep the brand row in step with edits here
         var tr = Number(done[1]);
-        if (isMail) {
-          tab.getRange(tr, 1).setValue(r[0]);
-          tab.getRange(tr, 3).setValue(r[2]);
-        } else {
-          tab.getRange(tr, 1).setValue(r[0]);
-          tab.getRange(tr, 16, 1, 2).setValues([[leYes_(r[2]), leYes_(r[3])]]);
-        }
-        updated++;
+        if (d.email && !leEmailOk_(d.email)) d.email = '';
+        if (d.phoneRaw && !lePhoneOk_(d.phoneRaw)) d.phoneRaw = '';
+        if (d.email && byEmail[d.email] && byEmail[d.email] !== tr) d.email = '';       // belongs to another lead
+        if (d.phoneRaw && byPhone[d.phone] && byPhone[d.phone] !== tr) d.phoneRaw = '';
+        if (dncE[d.email]) d.email = '';
+        if (dncP[d.phone]) d.phoneRaw = '';
+        fill(tr, d, 'sync');
         return;
       }
-      if (result) return;                           // skipped earlier: staff clear the Result to retry
+      if (result) return;                            // not added earlier: staff clear the Result to retry
 
-      var key, msg = '';
-      if (isMail) {
-        key = keyRaw.toLowerCase();
-        if (!/^[^\s@,;]+@[^\s@,;]+\.[a-z]{2,}$/i.test(key)) msg = 'Not added: email looks wrong';
-      } else {
-        key = leKey10_(keyRaw);
-        var digits = keyRaw.replace(/\D/g, '');
-        if (!key || digits.length > 15) msg = 'Not added: phone looks wrong';
+      var msg = '';
+      if (d.email && !leEmailOk_(d.email)) msg = 'Not added: email looks wrong';
+      else if (d.phoneRaw && !lePhoneOk_(d.phoneRaw)) msg = 'Not added: phone looks wrong';
+      else if (dncE[d.email] || dncP[d.phone]) msg = 'Not added: in Do Not Contact';
+      if (msg) { setResult(msg); skipped++; return; }
+
+      var rowE = d.email ? byEmail[d.email] : 0, rowP = d.phone ? byPhone[d.phone] : 0;
+      var main = isMail ? rowE : rowP, other = isMail ? rowP : rowE;
+      var otherGiven = isMail ? !!d.phone : !!d.email;
+      var otherFree = function (rr) { return isMail ? !phoneAt[rr] : !emailAt[rr]; };     // row has no phone / no email yet
+      var mainFree = function (rr) { return isMail ? !emailAt[rr] : !phoneAt[rr]; };
+
+      if (main) {                                    // this email / phone is already a lead
+        if (otherGiven && !other && otherFree(main)) {
+          fill(main, d, 'join');
+          setResult('Added to ' + what.brand + ' row ' + main + ' (joined: ' + (isMail ? 'phone' : 'email') + ' added to existing lead, ' + when + ')');
+          added++;
+        } else {
+          setResult('Not added: already in ' + what.brand + ' row ' + main +
+            (other && other !== main ? ' (' + (isMail ? 'phone' : 'email') + ' is in row ' + other + ')' : ''));
+          skipped++;
+        }
+        return;
       }
-      if (!msg && dnc[key]) msg = 'Not added: in Do Not Contact';
-      if (!msg && existing[key]) msg = 'Not added: already in ' + what.brand + ' row ' + existing[key];
-      if (msg) { sh.getRange(row, cfg.result + 1).setValue(msg); skipped++; return; }
-
+      if (other && mainFree(other)) {                // the other contact is already a lead without this one: join
+        fill(other, d, 'join');
+        setResult('Added to ' + what.brand + ' row ' + other + ' (joined with the lead that has this ' + (isMail ? 'phone' : 'email') + ', ' + when + ')');
+        added++;
+        return;
+      }
+      var note = '';
+      if (other) {                                   // other contact belongs to a different lead: do not repeat it
+        if (isMail) { note = ' (phone already in row ' + other + ', not repeated)'; d.phoneRaw = ''; d.phone = ''; }
+        else { note = ' (email already in row ' + other + ', not repeated)'; d.email = ''; }
+      }
       var target = nextRow++;
-      if (target > tab.getMaxRows()) tab.insertRowsAfter(tab.getMaxRows(), 500);
-      if (isMail) {
-        tab.getRange(target, 1, 1, 3).setValues([[r[0], key, r[2]]]);
-      } else {
-        tab.getRange(target, 1).setValue(r[0]);
-        tab.getRange(target, 15).setNumberFormat('@').setValue(keyRaw);
-        tab.getRange(target, 16, 1, 2).setValues([[leYes_(r[2]), leYes_(r[3])]]);
-      }
-      existing[key] = target;
-      sh.getRange(row, cfg.result + 1).setValue('Added to ' + what.brand + ' row ' + target + ' (' + when + ')');
+      fill(target, d, 'new');
+      setResult('Added to ' + what.brand + ' row ' + target + note + ' (' + when + ')');
       added++;
     });
     SpreadsheetApp.flush();
