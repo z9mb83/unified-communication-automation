@@ -68,7 +68,7 @@ function onEdit(e) {
     if (e.range.getColumn() > cfg.width) return;                                // only the yellow entry columns
     // the whole yellow block is checked on every edit, so an update missed while another one was running
     // (e.g. pasting the Phone and the Yes columns one after the other) is picked up by the next edit
-    var keyCol = cfg[cfg.key] + 1, lastEntry = sh.getRange(sh.getMaxRows(), keyCol).getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
+    var keyCol = cfg[cfg.key] + 1, lastEntry = leLastEntry_(sh, keyCol);
     // very large yellow lists (thousands of rows) are only processed where edited, to stay inside the time limit
     if (lastEntry > LE.RECHECK_MAX) leProcess_(sh, what, first, Math.min(last, first + LE.RECHECK_MAX));
     else leProcess_(sh, what, 2, Math.max(lastEntry, last, 2));
@@ -112,6 +112,13 @@ function leSelection_(sh, kind) {
     SpreadsheetApp.getUi().alert('Select the rows in the WHITE list on the right (the people to send to), not the yellow entry columns.');
   }
   return { sheet: sh.getParent().getSheetByName(what.brand), code: what.brand, rows: rows.sort(function (a, b) { return a - b; }) };
+}
+
+/** Last row with something in this column (the bottom cell itself may be filled). */
+function leLastEntry_(sh, col) {
+  var max = sh.getMaxRows(), bottom = sh.getRange(max, col);
+  if (String(bottom.getValue()) !== '') return max;
+  return bottom.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
 }
 
 function leWhich_(name) {
@@ -219,7 +226,7 @@ function leProcess_(sh, what, first, last) {
         if (d.phoneRaw && byPhone[d.phone] && byPhone[d.phone] !== tr) d.phoneRaw = '';
         if (dncE[d.email]) d.email = '';
         if (dncP[d.phone]) d.phoneRaw = '';
-        fill(tr, d, 'sync');
+        fill(tr, d, /joined|^Updated/.test(result) ? 'join' : 'sync');   // joined leads keep their existing name/details
         return;
       }
       // a row that was "Not added" is checked again on every edit (e.g. after fixing the number or picking Yes)
@@ -272,6 +279,179 @@ function leProcess_(sh, what, first, last) {
     if (added || skipped) {
       ss.toast(added + ' added to ' + what.brand + (skipped ? ', ' + skipped + ' not added (see Result)' : ''), 'Add lead', 5);
     }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ===================== BULK (large yellow lists) ===================== */
+/**
+ * leBulkSync(): processes the whole yellow list of every "<BRAND> Mail" / "<BRAND> WhatsApp" tab in memory
+ * and writes back in a few large blocks, so lists of 100,000+ rows fit in one run. Same rules as typing:
+ * duplicates, Do Not Contact, joining email+phone, Yes/No picks applied, blanks never clear a Yes.
+ * leBulkOn() installs it every 10 minutes; leBulkOff() removes that.
+ */
+function leBulkOn() {
+  leBulkOff();
+  ScriptApp.newTrigger('leBulkSync').timeBased().everyMinutes(10).create();
+}
+function leBulkOff() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'leBulkSync') ScriptApp.deleteTrigger(t); });
+}
+
+function leBulkSync() {
+  var ss = SpreadsheetApp.getActive(), t0 = Date.now(), out = [];
+  LE.BRANDS.forEach(function (b) {
+    ['WhatsApp', 'Mail'].forEach(function (k) {
+      if (Date.now() - t0 > 240000) return;                        // leave room inside the 6-minute limit
+      var sh = ss.getSheetByName(b + ' ' + k);
+      if (sh) out.push(b + ' ' + k + ': ' + leBulk_(sh, { brand: b, kind: k }));
+    });
+  });
+  Logger.log(out.join('\n'));
+  return out.join('\n');
+}
+
+function leBulk_(sh, what) {
+  var isMail = what.kind === 'Mail', cfg = isMail ? LE.MAIL : LE.WA, C = LE.COL, W = 17;   // brand columns A..Q
+  var keyCol = cfg[cfg.key] + 1;
+  var lastEntry = leLastEntry_(sh, keyCol);
+  if (lastEntry < 2) return 'nothing';
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(60000)) return 'busy';
+  try {
+    var ss = sh.getParent(), tab = ss.getSheetByName(what.brand);
+    var n0 = lastEntry - 1;
+    var entries = sh.getRange(2, 1, n0, cfg.width).getValues();
+    var keyF = sh.getRange(2, cfg.phone + 1, n0, 1).getFormulas(), fixPhones = [];
+    keyF.forEach(function (f, i) {
+      if (!f[0]) return;
+      var typed = String(f[0]).replace(/^=\s*/, '');
+      if (/^[+\d\s().-]+$/.test(typed)) { entries[i][cfg.phone] = typed; fixPhones.push(i); }
+    });
+
+    var lastRow = Math.max(tab.getLastRow(), LE.FIRST_LEAD_ROW - 1), n = lastRow - LE.FIRST_LEAD_ROW + 1;
+    var data = n > 0 ? tab.getRange(LE.FIRST_LEAD_ROW, 1, n, W).getValues() : [];
+    var newRows = [], firstNew = lastRow + 1, dirty = {};
+    var at = function (row) { return row >= firstNew ? newRows[row - firstNew] : data[row - LE.FIRST_LEAD_ROW]; };
+    var byEmail = {}, byPhone = {};
+    var em = function (r) { return String(r[C.EMAIL - 1]).trim().toLowerCase(); };
+    var pk = function (r) { return leKey10_(r[C.PHONE - 1]); };
+    data.forEach(function (r, i) {
+      var row = LE.FIRST_LEAD_ROW + i, e = em(r), p = pk(r);
+      if (e && !byEmail[e]) byEmail[e] = row;
+      if (p && !byPhone[p]) byPhone[p] = row;
+    });
+    var dncE = {}, dncP = {}, dsh = ss.getSheetByName('Do Not Contact');
+    if (dsh && dsh.getLastRow() > 1) dsh.getRange(2, 1, dsh.getLastRow() - 1, 5).getDisplayValues().forEach(function (r) {
+      var e = String(r[0]).trim().toLowerCase(), p = leKey10_(r[4]);
+      if (e) dncE[e] = true;
+      if (p) dncP[p] = true;
+    });
+
+    var when = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM HH:mm');
+    var results = entries.map(function (r) { return [r[cfg.result]]; }), resultsChanged = false;
+    var get = function (r, k) { return cfg[k] >= 0 ? r[cfg[k]] : ''; };
+    var set = function (row, col, v) {
+      var r = at(row);
+      if (String(r[col - 1]) !== String(v)) { r[col - 1] = v; if (row < firstNew) dirty[row] = true; }
+    };
+    var fill = function (row, d, mode) {
+      var r = at(row);
+      if (String(d.name).trim() && (mode !== 'join' || !String(r[C.NAME - 1]).trim())) set(row, C.NAME, d.name);
+      if (d.email && !em(r)) { set(row, C.EMAIL, d.email); byEmail[d.email] = row; }
+      if (d.details && (mode !== 'join' || !String(r[C.DETAILS - 1]).trim())) set(row, C.DETAILS, d.details);
+      if (d.phoneRaw && !pk(r)) { set(row, C.PHONE, d.phoneRaw); byPhone[d.phone] = row; }
+      if (d.send) set(row, C.SEND, d.send);
+      if (d.consent) set(row, C.CONSENT, d.consent);
+    };
+    var added = 0, updated = 0, skipped = 0;
+
+    entries.forEach(function (r, i) {
+      var result = String(r[cfg.result]).trim();
+      var d = {
+        name: get(r, 'name'), email: String(get(r, 'email')).trim().toLowerCase(), details: get(r, 'details'),
+        phoneRaw: String(get(r, 'phone')).trim(), send: leYes_(get(r, 'send')), consent: leYes_(get(r, 'consent'))
+      };
+      d.phone = leKey10_(d.phoneRaw);
+      if (!(isMail ? d.email : d.phoneRaw)) return;
+      var setResult = function (t) { if (t !== result) { results[i][0] = t; resultsChanged = true; } };
+
+      var done = /^(?:Added to|Updated) .*? row (\d+)/.exec(result);
+      if (done) {
+        var tr = Number(done[1]);
+        if (!(tr >= LE.FIRST_LEAD_ROW && tr <= lastRow)) return;
+        if (d.email && (!leEmailOk_(d.email) || (byEmail[d.email] && byEmail[d.email] !== tr) || dncE[d.email])) d.email = '';
+        if (d.phoneRaw && (!lePhoneOk_(d.phoneRaw) || (byPhone[d.phone] && byPhone[d.phone] !== tr) || dncP[d.phone])) d.phoneRaw = '';
+        fill(tr, d, /joined|^Updated/.test(result) ? 'join' : 'sync');
+        return;
+      }
+      var msg = '';
+      if (d.email && !leEmailOk_(d.email)) msg = 'Not added: email looks wrong';
+      else if (d.phoneRaw && !lePhoneOk_(d.phoneRaw)) msg = 'Not added: phone looks wrong';
+      else if (dncE[d.email] || dncP[d.phone]) msg = 'Not added: in Do Not Contact';
+      if (msg) { setResult(msg); skipped++; return; }
+
+      var rowE = d.email ? byEmail[d.email] : 0, rowP = d.phone ? byPhone[d.phone] : 0;
+      var main = isMail ? rowE : rowP, other = isMail ? rowP : rowE, otherGiven = isMail ? !!d.phone : !!d.email;
+      var otherFree = function (rr) { return isMail ? !pk(at(rr)) : !em(at(rr)); };
+      var mainFree = function (rr) { return isMail ? !em(at(rr)) : !pk(at(rr)); };
+      if (main) {
+        if (!isMail && (d.send || d.consent) && !otherGiven) {
+          fill(main, { name: '', email: '', details: '', phoneRaw: '', send: d.send, consent: d.consent }, 'join');
+          setResult('Updated ' + what.brand + ' row ' + main + ' (number was already there): Send WhatsApp ' + (d.send || '-') + ', consent ' + (d.consent || '-'));
+          updated++;
+        } else if (otherGiven && !other && otherFree(main)) {
+          fill(main, d, 'join');
+          setResult('Added to ' + what.brand + ' row ' + main + ' (joined: ' + (isMail ? 'phone' : 'email') + ' added to existing lead, ' + when + ')');
+          updated++;
+        } else {
+          setResult('Not added: already in ' + what.brand + ' row ' + main +
+            (other && other !== main ? ' (' + (isMail ? 'phone' : 'email') + ' is in row ' + other + ')' : ''));
+          skipped++;
+        }
+        return;
+      }
+      if (other && mainFree(other)) {
+        fill(other, d, 'join');
+        setResult('Added to ' + what.brand + ' row ' + other + ' (joined with the lead that has this ' + (isMail ? 'phone' : 'email') + ', ' + when + ')');
+        updated++;
+        return;
+      }
+      var note = '';
+      if (other) {
+        if (isMail) { note = ' (phone already in row ' + other + ', not repeated)'; d.phoneRaw = ''; d.phone = ''; }
+        else { note = ' (email already in row ' + other + ', not repeated)'; d.email = ''; }
+      }
+      var target = firstNew + newRows.length;
+      newRows.push(new Array(W).fill(''));
+      fill(target, d, 'new');
+      setResult('Added to ' + what.brand + ' row ' + target + note + ' (' + when + ')');
+      added++;
+    });
+
+    // write back: new rows in one block, changed existing rows as A:C and O:Q runs, results in one column
+    if (newRows.length) {
+      var need = firstNew + newRows.length - 1;
+      if (need > tab.getMaxRows()) tab.insertRowsAfter(tab.getMaxRows(), need - tab.getMaxRows() + 500);
+      tab.getRange(firstNew, C.PHONE, newRows.length, 1).setNumberFormat('@');
+      tab.getRange(firstNew, 1, newRows.length, 3).setValues(newRows.map(function (r) { return r.slice(0, 3); }));
+      tab.getRange(firstNew, C.PHONE, newRows.length, 3).setValues(newRows.map(function (r) { return r.slice(C.PHONE - 1, C.CONSENT); }));
+    }
+    var rows = Object.keys(dirty).map(Number).sort(function (a, b) { return a - b; });
+    for (var s = 0; s < rows.length;) {
+      var e2 = s;
+      while (e2 + 1 < rows.length && rows[e2 + 1] === rows[e2] + 1) e2++;
+      var start = rows[s], cnt = e2 - s + 1, block = [];
+      for (var k = 0; k < cnt; k++) block.push(data[start + k - LE.FIRST_LEAD_ROW]);
+      tab.getRange(start, 1, cnt, 3).setValues(block.map(function (r) { return r.slice(0, 3); }));
+      tab.getRange(start, C.PHONE, cnt, 3).setValues(block.map(function (r) { return r.slice(C.PHONE - 1, C.CONSENT); }));
+      s = e2 + 1;
+    }
+    if (fixPhones.length) fixPhones.forEach(function (i) { sh.getRange(i + 2, cfg.phone + 1).setNumberFormat('@').setValue(entries[i][cfg.phone]); });
+    if (resultsChanged) sh.getRange(2, cfg.result + 1, results.length, 1).setValues(results);
+    SpreadsheetApp.flush();
+    return n0 + ' rows checked, ' + added + ' added, ' + updated + ' updated, ' + skipped + ' not added, ' + rows.length + ' existing rows changed';
   } finally {
     lock.releaseLock();
   }
