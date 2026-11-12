@@ -21,6 +21,8 @@ whatsapp/    WhatsApp: sends each brand's approved Meta template (runs inside th
 sms/         SMS via Telinfy: built and parked, not active. How to switch it on: sms/README.md
 common/      Shared sheet script: menu, tab setup, dashboard, limits (Core.gs + appsscript.json)
   Dashboard.gs      read-only JSON feed for the web dashboard (published as an Apps Script web app)
+  Inbox.gs          dashboard inbox actions (WhatsApp replies, mail threads handled)
+  LeadEntry.gs      the <BRAND> Mail / <BRAND> WhatsApp working tabs: add leads, approve, send (since 11 Nov 2026)
   test/             offline tests for the sheet scripts:  node --test common/test/sheet.test.js
 archive/     Old code kept for reference only (not used)
 ```
@@ -28,10 +30,15 @@ The complete code from before this layout is on the branch `v1-before-master-she
 
 ## The sheet
 
+Staff work in two tabs per brand: **SB Mail** and **SB WhatsApp** (same for 99M, 99S, PE, SC) - see
+[Working tabs](#working-tabs-brand-mail--brand-whatsapp). The original brand tabs below are **hidden**: the mail
+sender, the WhatsApp script, the dashboard and the reports still read and write them, so they must never be deleted.
+
 | Tab | Use |
 |---|---|
+| **SB Mail · SB WhatsApp** (and the same for each brand) | The working tabs. Yellow columns on the left = add new leads; white columns = live list of every lead (read-only, filled by formulas); far-right yellow column = Approve (Mail) / Send WhatsApp (WhatsApp) |
 | **Dashboard** | Per brand: leads, drafts to approve, approved waiting, emails sent (today), failed, replied, WhatsApp sent (today), on/off |
-| **SB · 99M · 99S · PE · SC** | Leads. You type **Person / Company, Email, Phone**, optional **Details**. Email: *Approve email = Yes* sends the AI draft. WhatsApp: *Send WhatsApp = Yes* + *WhatsApp consent = Yes*. Everything else fills in automatically (draft, status, sent at, replied, WhatsApp status). |
+| **SB · 99M · 99S · PE · SC** (hidden) | The real lead rows the automation uses. You type **Person / Company, Email, Phone**, optional **Details**. Email: *Approve email = Yes* sends the AI draft. WhatsApp: *Send WhatsApp = Yes* + *WhatsApp consent = Yes*. Everything else fills in automatically (draft, status, sent at, replied, WhatsApp status). |
 | **Limits** | Per brand and channel: On (Yes/No), max per day, max per hour, minimum gap (minutes), sending hours |
 | **Mailboxes** | Each Gmail sender: enabled, daily and hourly limit, paused |
 | **WhatsApp Setup** | Per brand: Phone Number ID, WABA ID, template name + language, which column fills each template variable (Var 1 = A means the name) |
@@ -63,6 +70,50 @@ before sending (dead domains are skipped instead of bouncing), and bounces found
 number to **Do Not Contact**. Setup: menu WhatsApp → *Set up reply webhook*, paste the callback URL and verify token into
 Meta (WhatsApp → Configuration → Webhook). Code: `doPost` / `waApplyWebhook_` in `whatsapp/WhatsApp.gs`.
 
+## Working tabs (<BRAND> Mail / <BRAND> WhatsApp)
+Added 11-12 Nov 2026 so staff no longer work in the wide brand tabs. Nothing in the sender, WhatsApp script, dashboard,
+keys or tokens changed: the working tabs write into the hidden brand tab through `common/LeadEntry.gs`.
+
+**Layout of each tab**
+
+| Part | <BRAND> Mail | <BRAND> WhatsApp |
+|---|---|---|
+| Yellow, left (type here) | Name, Email, Details, Phone (optional), Result | Name, Phone, Send WhatsApp, Consent, Email (optional), Result |
+| Grey column | divider | divider |
+| White (read-only live list) | every lead with an email: subject, draft, status, sent at, approved, replied, **Row in <BRAND> tab** | one row per phone number: send, consent, status, sent at, delivery, replied, last reply, **Row in <BRAND> tab** |
+| Yellow, far right | **APPROVE draft (pick Yes)** | **SEND WHATSAPP (pick Yes = has consent)** |
+
+**Adding leads (yellow, left).** Type or paste in any empty yellow row. The script (simple `onEdit`, nothing to authorise)
+writes the lead into the hidden brand tab and the **Result** column says what happened:
+- `Added to SB row N` - new lead; it appears at the **bottom** of the white list.
+- `Added to SB row N (joined ...)` - same person as an existing lead: the phone (or email) was added to that row,
+  so one person = one lead and shows in both tabs.
+- `Updated SB row N (number was already there) ...` - the number existed; the Yes/No picked here was applied to it.
+- `Not added: already in SB row N` / `in Do Not Contact` / `email looks wrong` / `phone looks wrong`.
+  "Not added" rows are checked again on the next edit, so fixing the typo or picking Yes is enough.
+- Duplicates are matched on the email (lower case) or the **last 10 digits** of the phone, so `+91 98765 43210`,
+  `09876543210` and `9876543210` are one number. A number can still exist once in each brand.
+- Editing name / details / Yes columns of an added row updates the brand row; a blank cell never clears a Yes.
+- Typing `+91 ...` makes Google show `#ERROR!`; the script turns it back into plain text.
+
+**Approving / sending (white list).** Rows in the yellow area and the white list do **not** line up.
+- Approve an email draft: find the lead in the white list, pick **Yes** in the far-right Approve column on that row.
+  The sender sends it in its next 5-minute run, within the limits.
+- WhatsApp for an existing number: pick **Yes** in the far-right Send WhatsApp column (only with consent).
+- Send now: select the rows **in the white list**, then *AUTOMATION > Mail > Send mail to selected rows* or
+  *WhatsApp > Send WhatsApp to selected rows*. Selecting yellow rows is refused. The confirmation shows the hidden-tab
+  row numbers (same as the "Row in <BRAND> tab" column).
+
+**Big pastes (thousands of rows).** A sheet edit may only run 30 seconds, so above 1,000 yellow rows only the edited
+rows are processed. For big lists use the bulk processor (works in memory, 170,000 rows in ~3.5 minutes):
+- Once: Apps Script editor > `LeadEntry.gs` > run **leBulkSync**. The log prints rows checked / added / updated / not added.
+- Every 10 minutes automatically: run **leBulkOn** once (creates a time trigger); **leBulkOff** removes it.
+- 12 Nov 2026: 171,932 pasted rows in SB WhatsApp -> 68,047 added, 23,339 updated, 67,501 not added (duplicates).
+  SB now has ~85,000 rows; the white list ~84,000 numbers.
+
+**Sizes.** The white lists have fixed room (SB WhatsApp 171,933 rows, SB Mail 3,000, others 2,000-4,000). If a white list
+shows `#REF!`, add rows at the bottom of that tab. The whole spreadsheet must stay under Google's 10 million cells.
+
 ## How limits work
 - **Mail**: the sender runs every 5 minutes (10:00-17:55, Mon-Sat) and sends at most one email per brand per run,
   only if the brand is On, inside its hours, past its minimum gap, under its brand max per day/hour and under the
@@ -91,14 +142,25 @@ Meta (WhatsApp → Configuration → Webhook). Code: `doPost` / `waApplyWebhook_
   29 Sep) were cleared at 09:59 so the sender writes new-format drafts (random brief per lead, no website line, spam check).
   The old texts are in the hidden tab **Old drafts (backup)**. The sender drafts up to 20 rows per brand per run.
   To rewrite drafts after a future template change: `bash go_master.sh regen-preview`, then `bash go_master.sh regen`.
-- Mailbox **linkwithmarketing@gmail.com** failed with `invalid_grant` on 26-28 Sep; reconnect it with
-  `bash tools/connect_gmail.sh linkwithmarketing@gmail.com` before relying on it (same for linkwithshaadi@gmail.com).
+- Mailboxes **linkwithshaadi@gmail.com** and **linkwithskyline@gmail.com** show `invalid_grant` (Nov 2026); reconnect in
+  Cloud Shell: `cd ~/mail && bash tools/connect_gmail.sh linkwithshaadi@gmail.com` (note `~/mail` with a slash).
+- **Email reply tracking** (Nov 2026): the sender checks Gmail reply headers every 15 minutes during its runs (no message
+  bodies) and fills the hidden tabs **Mail Threads** / **Mail Sync**; the dashboard Mail page lists replies waiting for an
+  answer. Manual check: `bash go_master.sh replies-preview` / `replies`. Code: `mail/app/reply_sync.py`.
+- **Cc**: drafts are no longer copied to the brand domain mailbox (the dashboard shows everything); a cleared Cc stays blank.
+- **SMS** is sent from the separate OCR sheets (Shaadi OCR -> SB, Property OCR -> PE) through Telinfy, repo
+  [`OCR`](https://github.com/linkwithmarketing-design/OCR). Templates live in each OCR sheet's **SMS Templates** tab and
+  must also exist in Telinfy (Shaadi template 1677100000000395737 added 10 Nov 2026). Numbers that got the SMS are
+  pasted into SB WhatsApp / PE WhatsApp.
 - One-off tools (Cloud Shell): `mail/tools/send_one.sh <to> <name>` (single 99 Marketing email) and
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
 ## Live dashboard (Vercel)
 **https://automation-dashboard-sigma-rose.vercel.app** - password protected; charts of emails, replies, WhatsApp,
-lead pipeline and mailbox limits for all brands, refreshed every minute. Code: separate private repo
+lead pipeline and mailbox limits for all brands, refreshed every minute. Pages: Home (totals, needs attention, sending
+costs), Mail (incl. email replies waiting), WhatsApp, SMS (Telinfy reports per template, wallet, stop list), Inbox
+(WhatsApp chats). The **cost button** (top right) shows WhatsApp (Rs 0.8631 + 18% GST per delivered template) and SMS
+(Rs 0.22 each) spend so far. Code: separate private repo
 [`automation-dashboard`](https://github.com/linkwithmarketing-design/automation-dashboard) (Next.js on Vercel, Hobby plan).
 
 ```

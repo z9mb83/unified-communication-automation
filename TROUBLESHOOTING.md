@@ -89,6 +89,38 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | `All mailboxes reached their daily limit` | Normal late in the day; wait for tomorrow or raise a mailbox's daily limit slightly (**Mailboxes** tab) | `mail/app/send_now.py` (`pick_mailbox`) |
 | Row still `Pending` | Menu **Mail -> Show send-now results** -> start again | `mail/sheet/Mail.gs` (`mlShowSendNow`) |
 
+## Working tabs (<BRAND> Mail / <BRAND> WhatsApp)
+| What you see | Fix | File |
+|---|---|---|
+| Typed a number in yellow, can't find it in the white list | New leads go to the **bottom** of the white list (Ctrl+Down in the white Phone column). Check the yellow **Result** column | `common/LeadEntry.gs` |
+| Result `Not added: already in SB row N` | The number/email is already a lead (matched on last 10 digits / lower-case email). Picking Yes on that yellow row applies it to row N | `common/LeadEntry.gs` (`leProcess_`) |
+| Result `Not added: in Do Not Contact` | The person opted out (e.g. replied STOP). Do not message them | **Do Not Contact** tab |
+| Result `phone looks wrong` / `email looks wrong` | Fix the cell; the row is checked again on the next edit | `common/LeadEntry.gs` |
+| Pasted Phone, then Send, then Consent columns separately: Consent blank in the white list | Two edits ran at once and one was skipped. Edit any yellow cell (re-checks the whole list if under 1,000 rows) or run **leBulkSync** | `common/LeadEntry.gs` |
+| Pasted thousands of rows, most Results empty | Edits only run 30 s. Apps Script > `LeadEntry.gs` > run **leBulkSync** (or **leBulkOn** for every 10 min) | `common/LeadEntry.gs` (`leBulk_`) |
+| `#ERROR!` after typing `+91 ...` | Google treats `+` as a formula; the script restores it as text on the next edit | `common/LeadEntry.gs` (`leFixTypedPhones_`) |
+| White list shows `#REF!` | The tab ran out of rows: add rows at the bottom of that tab | sheet |
+| White list shows "No phone numbers yet" / "No emails yet" but the brand has leads | Formula in the first white cell (G2 Mail / H2 WhatsApp) was overwritten: undo, or restore the FILTER formula from git history (`common/LeadEntry.gs` header describes the layout) | sheet |
+| Lock icon / "You are trying to edit a protected cell" | Warning-only protection on the white list: don't type there | sheet protection |
+| "Open a brand tab ... and select the rows first" | Old menu code: reload the sheet | `mail/sheet/Mail.gs`, `whatsapp/WhatsApp.gs` |
+| "Select the rows in the WHITE list" | Rows were selected in the yellow area; select the person's row in the white list | `common/LeadEntry.gs` (`leSelection_`) |
+| `Skipped: WhatsApp consent is not Yes` | Pick Yes in the far-right SEND WHATSAPP column for that row (only with consent) | `common/LeadEntry.gs` (`leAction_`) |
+| Approve pick disappears | Normal: the pick is copied to the brand tab and cleared; the white **Approved** column shows Yes | `common/LeadEntry.gs` (`leAction_`) |
+| Toast "Busy: edit any yellow cell again" | Another update was running; edit again in a few seconds | `common/LeadEntry.gs` |
+
+## Cloud Shell
+| What you see | Fix |
+|---|---|
+| `bash: tools/connect_gmail.sh: No such file or directory` | Go to the mail folder first: `cd ~/mail` (with a slash; `cd ~mail` opens `/var/mail`). If `~/mail` is missing, upload the mail bundle and unpack it there (`mail/REPAIR.md`) |
+| connect_gmail: "access blocked" | Add the Gmail as Test user (Google Auth Platform > Audience) and run again |
+
+## SMS (OCR sheets, Telinfy)
+| What you see | Fix | Where |
+|---|---|---|
+| **Check templates with Telinfy**: "template ID ... is not in Telinfy" | Add the template in Telinfy > Templates with the same 19-digit ID and exactly the DLT text | Telinfy, OCR sheet tab **SMS Templates** |
+| SMS rejected / template error | ID or text differs from DLT/Telinfy; compare character by character (the check shows where) | OCR repo `src/Telinfy_SMS.gs` |
+| Dashboard SMS page "sample data" | `TELINFY_API_KEY` missing on Vercel; add it and Redeploy | Vercel settings |
+
 ## Dashboard (Vercel)
 | What you see | Fix | Where |
 |---|---|---|
@@ -103,4 +135,4 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Wrong numbers / chart | Counting: `common/Dashboard.gs` (`dbLeadStats_`); display: `app/page.js`, `components/charts.js` | both repos |
 
 ## Before pasting / deploying a fix
-`node --test common/test/sheet.test.js` · `cd mail && python -m unittest test_mail_limits test_daily_report test_send_now` · dashboard repo: `npm test && npm run build`
+`node --test common/test/sheet.test.js` · `node -e "new Function(require('fs').readFileSync('common/LeadEntry.gs','utf8'))"` (syntax) · `cd mail && python -m unittest test_mail_limits test_daily_report test_send_now` · dashboard repo: `npm test && npm run build`
