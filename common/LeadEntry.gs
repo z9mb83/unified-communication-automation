@@ -19,7 +19,8 @@ var LE = {
   // entry columns (0-based inside the yellow block)
   MAIL: { width: 5, name: 0, email: 1, details: 2, phone: 3, send: -1, consent: -1, result: 4, key: 'email' },
   WA: { width: 6, name: 0, phone: 1, send: 2, consent: 3, email: 4, details: -1, result: 5, key: 'phone' },
-  FIRST_LEAD_ROW: 3,                              // brand tabs: row 1 = sender, row 2 = headers
+  FIRST_LEAD_ROW: 3,
+  RECHECK_MAX: 1000,                              // above this many yellow rows, only the edited rows are processed                              // brand tabs: row 1 = sender, row 2 = headers
   COL: { NAME: 1, EMAIL: 2, DETAILS: 3, APPROVE: 10, PHONE: 15, SEND: 16, CONSENT: 17 },   // brand tab columns
   // action columns right of the live view: picking Yes/No copies it to the brand tab row shown in the view
   MAIL_APPROVE_COL: 21, MAIL_ROWREF_COL: 20,      // U "Approve" -> brand column J; T = "Row in <BRAND> tab"
@@ -68,7 +69,9 @@ function onEdit(e) {
     // the whole yellow block is checked on every edit, so an update missed while another one was running
     // (e.g. pasting the Phone and the Yes columns one after the other) is picked up by the next edit
     var keyCol = cfg[cfg.key] + 1, lastEntry = sh.getRange(sh.getMaxRows(), keyCol).getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
-    leProcess_(sh, what, 2, Math.max(lastEntry, last, 2));
+    // very large yellow lists (thousands of rows) are only processed where edited, to stay inside the time limit
+    if (lastEntry > LE.RECHECK_MAX) leProcess_(sh, what, first, Math.min(last, first + LE.RECHECK_MAX));
+    else leProcess_(sh, what, 2, Math.max(lastEntry, last, 2));
   } catch (err) {
     try { SpreadsheetApp.getActive().toast(String(err.message || err), 'Add lead', 8); } catch (ignore) {}
   }
