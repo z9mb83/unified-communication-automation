@@ -65,7 +65,10 @@ function onEdit(e) {
       return;
     }
     if (e.range.getColumn() > cfg.width) return;                                // only the yellow entry columns
-    leProcess_(sh, what, first, last);
+    // the whole yellow block is checked on every edit, so an update missed while another one was running
+    // (e.g. pasting the Phone and the Yes columns one after the other) is picked up by the next edit
+    var keyCol = cfg[cfg.key] + 1, lastEntry = sh.getRange(sh.getMaxRows(), keyCol).getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
+    leProcess_(sh, what, 2, Math.max(lastEntry, last, 2));
   } catch (err) {
     try { SpreadsheetApp.getActive().toast(String(err.message || err), 'Add lead', 8); } catch (ignore) {}
   }
@@ -145,19 +148,20 @@ function leProcess_(sh, what, first, last) {
   if (!entries.some(function (r) { return String(r[cfg[cfg.key]]).trim(); })) return;
 
   var lock = LockService.getDocumentLock();
-  if (!lock.tryLock(20000)) { SpreadsheetApp.getActive().toast('Busy, try again in a moment.', 'Add lead', 5); return; }
+  if (!lock.tryLock(28000)) { SpreadsheetApp.getActive().toast('Busy: edit any yellow cell again in a moment to finish.', 'Add lead', 6); return; }
   try {
     var ss = sh.getParent(), tab = ss.getSheetByName(what.brand);
     if (!tab) throw new Error('Tab ' + what.brand + ' not found');
     var lastRow = Math.max(tab.getLastRow(), LE.FIRST_LEAD_ROW - 1), n = lastRow - LE.FIRST_LEAD_ROW + 1;
 
     // what the brand tab already has: email -> row, phone -> row, and per row whether it has an email / phone
-    var byEmail = {}, byPhone = {}, emailAt = {}, phoneAt = {};
+    var byEmail = {}, byPhone = {}, emailAt = {}, phoneAt = {}, cur = {};
     if (n > 0) {
-      var emails = tab.getRange(LE.FIRST_LEAD_ROW, C.EMAIL, n, 1).getDisplayValues();
-      var phones = tab.getRange(LE.FIRST_LEAD_ROW, C.PHONE, n, 1).getDisplayValues();
+      var abc = tab.getRange(LE.FIRST_LEAD_ROW, C.NAME, n, 3).getDisplayValues();          // A name, B email, C details
+      var opq = tab.getRange(LE.FIRST_LEAD_ROW, C.PHONE, n, 3).getDisplayValues();         // O phone, P send, Q consent
       for (var i = 0; i < n; i++) {
-        var row = LE.FIRST_LEAD_ROW + i, em = String(emails[i][0]).trim().toLowerCase(), pk = leKey10_(phones[i][0]);
+        var row = LE.FIRST_LEAD_ROW + i, em = String(abc[i][1]).trim().toLowerCase(), pk = leKey10_(opq[i][0]);
+        cur[row] = { name: abc[i][0], details: abc[i][2], send: opq[i][1], consent: opq[i][2] };
         if (em) { emailAt[row] = em; if (!byEmail[em]) byEmail[em] = row; }
         if (pk) { phoneAt[row] = pk; if (!byPhone[pk]) byPhone[pk] = row; }
       }
@@ -180,13 +184,16 @@ function leProcess_(sh, what, first, last) {
     // mode: 'new' row, 'join' into an existing lead (fills blanks only), 'sync' an entry added earlier
     var fill = function (row, d, mode) {
       if (row > tab.getMaxRows()) tab.insertRowsAfter(tab.getMaxRows(), 500);
-      if (String(d.name).trim() && (mode !== 'join' || !String(tab.getRange(row, C.NAME).getValue()).trim())) tab.getRange(row, C.NAME).setValue(d.name);
+      var c = cur[row] || (cur[row] = { name: '', details: '', send: '', consent: '' });
+      var put = function (col, key, v) { if (String(v) !== String(c[key])) { tab.getRange(row, col).setValue(v); c[key] = v; } };
+      if (String(d.name).trim() && (mode !== 'join' || !String(c.name).trim())) put(C.NAME, 'name', d.name);
       if (d.email && !emailAt[row]) { tab.getRange(row, C.EMAIL).setValue(d.email); emailAt[row] = d.email; byEmail[d.email] = row; }
-      if (d.details && (mode !== 'join' || !String(tab.getRange(row, C.DETAILS).getValue()).trim())) tab.getRange(row, C.DETAILS).setValue(d.details);
+      if (d.details && (mode !== 'join' || !String(c.details).trim())) put(C.DETAILS, 'details', d.details);
       if (d.phoneRaw && !phoneAt[row]) {
         tab.getRange(row, C.PHONE).setNumberFormat('@').setValue(d.phoneRaw); phoneAt[row] = d.phone; byPhone[d.phone] = row;
       }
-      if (d.send || d.consent) tab.getRange(row, C.SEND, 1, 2).setValues([[d.send, d.consent]]);
+      if (d.send) put(C.SEND, 'send', d.send);                // a blank pick never clears what is there
+      if (d.consent) put(C.CONSENT, 'consent', d.consent);
     };
 
     entries.forEach(function (r, i) {
@@ -197,7 +204,8 @@ function leProcess_(sh, what, first, last) {
       };
       d.phone = leKey10_(d.phoneRaw);
       if (!(isMail ? d.email : d.phoneRaw)) return;
-      var setResult = function (t) { sh.getRange(row, cfg.result + 1).setValue(t); };
+      var changed = false;
+      var setResult = function (t) { if (t !== result) { sh.getRange(row, cfg.result + 1).setValue(t); changed = true; } };
 
       var done = /^(?:Added to|Updated) .*? row (\d+)/.exec(result);
       if (done) {                                    // already added: keep the brand row in step with edits here
@@ -217,7 +225,7 @@ function leProcess_(sh, what, first, last) {
       if (d.email && !leEmailOk_(d.email)) msg = 'Not added: email looks wrong';
       else if (d.phoneRaw && !lePhoneOk_(d.phoneRaw)) msg = 'Not added: phone looks wrong';
       else if (dncE[d.email] || dncP[d.phone]) msg = 'Not added: in Do Not Contact';
-      if (msg) { setResult(msg); skipped++; return; }
+      if (msg) { setResult(msg); if (changed) skipped++; return; }
 
       var rowE = d.email ? byEmail[d.email] : 0, rowP = d.phone ? byPhone[d.phone] : 0;
       var main = isMail ? rowE : rowP, other = isMail ? rowP : rowE;
@@ -227,7 +235,7 @@ function leProcess_(sh, what, first, last) {
 
       if (main) {                                    // this email / phone is already a lead
         if (!isMail && (d.send || d.consent) && !otherGiven) {     // number already a lead: apply the Yes/No picked here
-          tab.getRange(main, C.SEND, 1, 2).setValues([[d.send, d.consent]]);
+          fill(main, { name: '', email: '', details: '', phoneRaw: '', send: d.send, consent: d.consent }, 'join');
           setResult('Updated ' + what.brand + ' row ' + main + ' (number was already there): Send WhatsApp ' + (d.send || '-') + ', consent ' + (d.consent || '-'));
           added++;
         } else if (otherGiven && !other && otherFree(main)) {
@@ -237,7 +245,7 @@ function leProcess_(sh, what, first, last) {
         } else {
           setResult('Not added: already in ' + what.brand + ' row ' + main +
             (other && other !== main ? ' (' + (isMail ? 'phone' : 'email') + ' is in row ' + other + ')' : ''));
-          skipped++;
+          if (changed) skipped++;
         }
         return;
       }
