@@ -315,6 +315,58 @@ function leBulkOff() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'leBulkSync') ScriptApp.deleteTrigger(t); });
 }
 
+/**
+ * Run from the editor (one-off clean-up): removes repeated phone numbers from the yellow area of every WhatsApp tab.
+ * The first copy of each number stays (its row moves up); a Yes picked on any copy is kept on it, and an empty
+ * name / email is filled from a later copy. Rows without a valid number are kept as they are. Only the yellow columns
+ * A-F change; the brand tabs are not touched. The white-list formula (H2) is paused while writing and put back after.
+ * Writes in chunks and stops before the 6-minute limit; running it again finishes the job (safe to repeat).
+ * Undo: File > Version history.
+ */
+function leDedupeWhatsApp() {
+  var ss = SpreadsheetApp.getActive(), out = [], t0 = Date.now(), CHUNK = 15000;
+  LE.BRANDS.forEach(function (b) {
+    var sh = ss.getSheetByName(b + ' WhatsApp');
+    if (!sh) return;
+    if (Date.now() - t0 > 270000) { out.push(b + ': not reached, run again'); return; }
+    var cfg = LE.WA, last = leLastEntry_(sh, cfg.phone + 1);
+    if (last < 2) { out.push(b + ': empty'); return; }
+    var data = sh.getRange(2, 1, last - 1, cfg.width).getValues(), keep = [], at = {}, removed = 0;
+    data.forEach(function (r) {
+      var k = leKey10_(r[cfg.phone]);
+      if (!k || at[k] === undefined) { if (k) at[k] = keep.length; keep.push(r.slice()); return; }
+      var t = keep[at[k]];
+      removed++;
+      [cfg.send, cfg.consent].forEach(function (c) {
+        if (leYes_(r[c]) === 'Yes' || (!String(t[c]).trim() && String(r[c]).trim())) t[c] = r[c];
+      });
+      [cfg.name, cfg.email].forEach(function (c) { if (!String(t[c]).trim() && String(r[c]).trim()) t[c] = r[c]; });
+    });
+    if (!removed) { out.push(b + ': no repeats (' + data.length + ' rows)'); return; }
+    keep = keep.map(function (r) {                         // keep '+91 ...' and '=' texts as plain text
+      return r.map(function (v) { return typeof v === 'string' && /^[+=]/.test(v) ? "'" + v : v; });
+    });
+    var view = sh.getRange(2, cfg.width + 2), formula = view.getFormula(), done = 0;
+    if (formula) PropertiesService.getDocumentProperties().setProperty('LE_VIEW_' + b, formula);
+    view.setValue('(paused: removing repeated numbers)');
+    try {
+      for (; done < keep.length; done += CHUNK) {
+        if (Date.now() - t0 > 300000) break;               // stop safely; the next run continues
+        var part = keep.slice(done, done + CHUNK);
+        sh.getRange(2 + done, 1, part.length, cfg.width).setValues(part);
+        SpreadsheetApp.flush();
+      }
+      if (done >= keep.length) sh.getRange(2 + keep.length, 1, data.length - keep.length, cfg.width).clearContent();
+    } finally {
+      view.setFormula(formula || PropertiesService.getDocumentProperties().getProperty('LE_VIEW_' + b));
+    }
+    out.push(b + ': ' + data.length + ' rows -> ' + keep.length + ' (' + removed + ' repeats removed)' +
+      (done >= keep.length ? '' : ' - STOPPED at row ' + (done + 1) + ', run again'));
+  });
+  Logger.log(out.join('\n'));
+  return out.join('\n');
+}
+
 function leBulkSync() {
   var ss = SpreadsheetApp.getActive(), t0 = Date.now(), out = [];
   LE.BRANDS.forEach(function (b) {

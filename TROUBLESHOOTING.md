@@ -100,6 +100,8 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 | Pasted Phone, then Send, then Consent columns separately: Consent blank in the white list | Two edits ran at once and one was skipped. Edit any yellow cell (re-checks the whole list if under 1,000 rows) or run **leBulkSync** | `common/LeadEntry.gs` |
 | Pasted thousands of rows, most Results empty | Edits only run 30 s. Apps Script > `LeadEntry.gs` > run **leBulkSync** (or **leBulkOn** for every 10 min) | `common/LeadEntry.gs` (`leBulk_`) |
 | `#ERROR!` after typing `+91 ...` | Google treats `+` as a formula; the script restores it as text on the next edit | `common/LeadEntry.gs` (`leFixTypedPhones_`) |
+| Same number on several yellow/white rows (WhatsApp tabs) | Repeated in the yellow paste; only one brand row exists, so it is sent once. Tidy: run **leDedupeWhatsApp** in the editor | `common/LeadEntry.gs` |
+| White list shows `(paused: removing repeated numbers)` | leDedupeWhatsApp was stopped mid-way: run it again, or paste the H2 formula from `common/README.md` | sheet |
 | White list shows `#REF!` | The tab ran out of rows, or something was typed inside the white area (delete it). WhatsApp tabs add rows themselves on the next yellow edit; Mail tabs: add rows at the bottom | sheet, `leRoom_` |
 | White list shows "No phone numbers yet" / "No emails yet" but the brand has leads | Formula in the first white cell (G2 Mail / H2 WhatsApp) was overwritten: undo, or paste the formula from `common/README.md` (Restoring a white list) | sheet |
 | Lock icon / "You are trying to edit a protected cell" | Warning-only protection on the white list: don't type there | sheet protection |

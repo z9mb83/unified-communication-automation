@@ -111,6 +111,8 @@ writes the lead into the hidden brand tab and the **Result** column says what ha
 rows are processed. For big lists use the bulk processor (works in memory, 170,000 rows in ~3.5 minutes):
 - Once: Apps Script editor > `LeadEntry.gs` > run **leBulkSync**. The log prints rows checked / added / updated / not added.
 - Every 10 minutes automatically: run **leBulkOn** once (creates a time trigger); **leBulkOff** removes it.
+- Repeated numbers in the yellow area of the WhatsApp tabs: run **leDedupeWhatsApp** (keeps the first copy, keeps any Yes
+  picked on a copy; safe to run again). 13 Nov 2026: SB WhatsApp 173,550 -> 73,749 rows, PE WhatsApp 2,241 -> 1,001.
 - 12 Nov 2026: 171,932 pasted rows in SB WhatsApp -> 68,047 added, 23,339 updated, 67,501 not added (duplicates).
   SB now has ~85,000 rows; the white list ~84,000 numbers.
 
