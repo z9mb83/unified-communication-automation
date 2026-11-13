@@ -80,12 +80,13 @@ keys or tokens changed: the working tabs write into the hidden brand tab through
 |---|---|---|
 | Yellow, left (type here) | Name, Email, Details, Phone (optional), Result | Name, Phone, Send WhatsApp, Consent, Email (optional), Result |
 | Grey column | divider | divider |
-| White (read-only live list) | every lead with an email: subject, draft, status, sent at, approved, replied, **Row in <BRAND> tab** | one row per phone number: send, consent, status, sent at, delivery, replied, last reply, **Row in <BRAND> tab** |
+| White (read-only live list) | every lead with an email: subject, draft, status, sent at, approved, replied, **Row in <BRAND> tab** | **row-by-row with yellow** (white row N = the number in yellow row N): send, consent, status, sent at, delivery, replied, last reply, **Row in <BRAND> tab**; below the yellow rows: the brand's numbers never typed in yellow |
 | Yellow, far right | **APPROVE draft (pick Yes)** | **SEND WHATSAPP (pick Yes = has consent)** |
 
 **Adding leads (yellow, left).** Type or paste in any empty yellow row. The script (simple `onEdit`, nothing to authorise)
 writes the lead into the hidden brand tab and the **Result** column says what happened:
-- `Added to SB row N` - new lead; it appears at the **bottom** of the white list.
+- `Added to SB row N` - new lead. Mail: it appears at the **bottom** of the white list. WhatsApp: it appears on the
+  **same row** in the white list (send, consent, status straight away).
 - `Added to SB row N (joined ...)` - same person as an existing lead: the phone (or email) was added to that row,
   so one person = one lead and shows in both tabs.
 - `Updated SB row N (number was already there) ...` - the number existed; the Yes/No picked here was applied to it.
@@ -96,12 +97,14 @@ writes the lead into the hidden brand tab and the **Result** column says what ha
 - Editing name / details / Yes columns of an added row updates the brand row; a blank cell never clears a Yes.
 - Typing `+91 ...` makes Google show `#ERROR!`; the script turns it back into plain text.
 
-**Approving / sending (white list).** Rows in the yellow area and the white list do **not** line up.
+**Approving / sending (white list).** WhatsApp tabs: yellow and white **line up** (since 13 Nov 2026). Mail tabs: they do
+**not** line up; find the lead in the white list.
 - Approve an email draft: find the lead in the white list, pick **Yes** in the far-right Approve column on that row.
   The sender sends it in its next 5-minute run, within the limits.
 - WhatsApp for an existing number: pick **Yes** in the far-right Send WhatsApp column (only with consent).
 - Send now: select the rows **in the white list**, then *AUTOMATION > Mail > Send mail to selected rows* or
-  *WhatsApp > Send WhatsApp to selected rows*. Selecting yellow rows is refused. The confirmation shows the hidden-tab
+  *WhatsApp > Send WhatsApp to selected rows*. WhatsApp: yellow or white rows both work. Mail: selecting yellow rows is
+  refused. The confirmation shows the hidden-tab
   row numbers (same as the "Row in <BRAND> tab" column).
 
 **Big pastes (thousands of rows).** A sheet edit may only run 30 seconds, so above 1,000 yellow rows only the edited
@@ -111,8 +114,9 @@ rows are processed. For big lists use the bulk processor (works in memory, 170,0
 - 12 Nov 2026: 171,932 pasted rows in SB WhatsApp -> 68,047 added, 23,339 updated, 67,501 not added (duplicates).
   SB now has ~85,000 rows; the white list ~84,000 numbers.
 
-**Sizes.** The white lists have fixed room (SB WhatsApp 171,933 rows, SB Mail 3,000, others 2,000-4,000). If a white list
-shows `#REF!`, add rows at the bottom of that tab. The whole spreadsheet must stay under Google's 10 million cells.
+**Sizes.** A WhatsApp white list needs (yellow rows + numbers never typed in yellow) rows; SB WhatsApp has 189,550
+(13 Nov: 173,550 yellow + 10,856 others). When it shows `#REF!` the script adds empty rows by itself on the next edit
+(`leRoom_`). Mail tabs: SB Mail 3,000, others 2,000-4,000; add rows by hand if `#REF!`. The whole spreadsheet must stay under Google's 10 million cells.
 
 ## How limits work
 - **Mail**: the sender runs every 5 minutes (10:00-17:55, Mon-Sat) and sends at most one email per brand per run,

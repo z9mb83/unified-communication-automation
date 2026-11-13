@@ -72,6 +72,7 @@ function onEdit(e) {
     // very large yellow lists (thousands of rows) are only processed where edited, to stay inside the time limit
     if (lastEntry > LE.RECHECK_MAX) leProcess_(sh, what, first, Math.min(last, first + LE.RECHECK_MAX));
     else leProcess_(sh, what, 2, Math.max(lastEntry, last, 2));
+    leRoom_(sh, what, true);
   } catch (err) {
     try { SpreadsheetApp.getActive().toast(String(err.message || err), 'Add lead', 8); } catch (ignore) {}
   }
@@ -101,7 +102,8 @@ function leSelection_(sh, kind) {
   sh.getActiveRangeList().getRanges().forEach(function (r) {
     var top = Math.max(2, r.getRow()), bottom = r.getLastRow();
     if (bottom < top) return;
-    if (r.getLastColumn() <= yellowEnd) { yellowOnly = true; return; }          // yellow rows are not the list rows
+    // Mail: yellow rows are not the list rows. WhatsApp: the white list is row-by-row with yellow, so any column works.
+    if (kind === 'Mail' && r.getLastColumn() <= yellowEnd) { yellowOnly = true; return; }
     yellowOnly = false;
     sh.getRange(top, refCol, bottom - top + 1, 1).getValues().forEach(function (v) {
       var n = Number(v[0]);
@@ -112,6 +114,20 @@ function leSelection_(sh, kind) {
     SpreadsheetApp.getUi().alert('Select the rows in the WHITE list on the right (the people to send to), not the yellow entry columns.');
   }
   return { sheet: sh.getParent().getSheetByName(what.brand), code: what.brand, rows: rows.sort(function (a, b) { return a - b; }) };
+}
+
+/**
+ * WhatsApp tabs: the white list is row-by-row with the yellow entries (white row N = yellow row N's number),
+ * followed by the brand's numbers that were never typed in yellow. When the tab runs out of rows the list shows
+ * #REF!, so add rows (empty rows only, nothing is moved or deleted).
+ */
+function leRoom_(sh, what, quick) {
+  if (what.kind !== 'WhatsApp') return;
+  if (!quick) SpreadsheetApp.flush();             // quick (on every edit): no waiting, a missed #REF! is caught next edit
+  for (var i = 0; i < 3 && String(sh.getRange(2, LE.WA.width + 2).getDisplayValue()) === '#REF!'; i++) {
+    sh.insertRowsAfter(sh.getMaxRows(), Math.max(5000, Math.round(sh.getMaxRows() * 0.05)));
+    SpreadsheetApp.flush();
+  }
 }
 
 /** Last row with something in this column (the bottom cell itself may be filled). */
@@ -305,7 +321,7 @@ function leBulkSync() {
     ['WhatsApp', 'Mail'].forEach(function (k) {
       if (Date.now() - t0 > 240000) return;                        // leave room inside the 6-minute limit
       var sh = ss.getSheetByName(b + ' ' + k);
-      if (sh) out.push(b + ' ' + k + ': ' + leBulk_(sh, { brand: b, kind: k }));
+      if (sh) { out.push(b + ' ' + k + ': ' + leBulk_(sh, { brand: b, kind: k })); leRoom_(sh, { brand: b, kind: k }); }
     });
   });
   Logger.log(out.join('\n'));

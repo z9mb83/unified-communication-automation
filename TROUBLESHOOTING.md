@@ -92,18 +92,19 @@ Emergency stop for all mail: `bash mail/go_master.sh stop`. Previous code: branc
 ## Working tabs (<BRAND> Mail / <BRAND> WhatsApp)
 | What you see | Fix | File |
 |---|---|---|
-| Typed a number in yellow, can't find it in the white list | New leads go to the **bottom** of the white list (Ctrl+Down in the white Phone column). Check the yellow **Result** column | `common/LeadEntry.gs` |
+| Typed a number in yellow, can't find it in the white list | WhatsApp: it is on the **same row** on the white side; blank there = not in the brand tab, see the yellow **Result** column (Do Not Contact, wrong number...). Mail: new leads go to the **bottom** of the white list | `common/LeadEntry.gs`, formula in H2 |
+| WhatsApp white side shows other numbers than the yellow rows next to it | Old formula (before 13 Nov 2026) listed all numbers sorted by status. Paste the new H2 formula from `common/README.md` | sheet |
 | Result `Not added: already in SB row N` | The number/email is already a lead (matched on last 10 digits / lower-case email). Picking Yes on that yellow row applies it to row N | `common/LeadEntry.gs` (`leProcess_`) |
 | Result `Not added: in Do Not Contact` | The person opted out (e.g. replied STOP). Do not message them | **Do Not Contact** tab |
 | Result `phone looks wrong` / `email looks wrong` | Fix the cell; the row is checked again on the next edit | `common/LeadEntry.gs` |
 | Pasted Phone, then Send, then Consent columns separately: Consent blank in the white list | Two edits ran at once and one was skipped. Edit any yellow cell (re-checks the whole list if under 1,000 rows) or run **leBulkSync** | `common/LeadEntry.gs` |
 | Pasted thousands of rows, most Results empty | Edits only run 30 s. Apps Script > `LeadEntry.gs` > run **leBulkSync** (or **leBulkOn** for every 10 min) | `common/LeadEntry.gs` (`leBulk_`) |
 | `#ERROR!` after typing `+91 ...` | Google treats `+` as a formula; the script restores it as text on the next edit | `common/LeadEntry.gs` (`leFixTypedPhones_`) |
-| White list shows `#REF!` | The tab ran out of rows: add rows at the bottom of that tab | sheet |
+| White list shows `#REF!` | The tab ran out of rows, or something was typed inside the white area (delete it). WhatsApp tabs add rows themselves on the next yellow edit; Mail tabs: add rows at the bottom | sheet, `leRoom_` |
 | White list shows "No phone numbers yet" / "No emails yet" but the brand has leads | Formula in the first white cell (G2 Mail / H2 WhatsApp) was overwritten: undo, or paste the formula from `common/README.md` (Restoring a white list) | sheet |
 | Lock icon / "You are trying to edit a protected cell" | Warning-only protection on the white list: don't type there | sheet protection |
 | "Open a brand tab ... and select the rows first" | Old menu code: reload the sheet | `mail/sheet/Mail.gs`, `whatsapp/WhatsApp.gs` |
-| "Select the rows in the WHITE list" | Rows were selected in the yellow area; select the person's row in the white list | `common/LeadEntry.gs` (`leSelection_`) |
+| "Select the rows in the WHITE list" | Mail tabs only: rows were selected in the yellow area; select the person's row in the white list | `common/LeadEntry.gs` (`leSelection_`) |
 | `Skipped: WhatsApp consent is not Yes` | Pick Yes in the far-right SEND WHATSAPP column for that row (only with consent) | `common/LeadEntry.gs` (`leAction_`) |
 | Approve pick disappears | Normal: the pick is copied to the brand tab and cleared; the white **Approved** column shows Yes | `common/LeadEntry.gs` (`leAction_`) |
 | Toast "Busy: edit any yellow cell again" | Another update was running; edit again in a few seconds | `common/LeadEntry.gs` |
