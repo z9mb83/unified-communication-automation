@@ -211,8 +211,9 @@ function waSendSelected() {
     if (parsed.header) {
       try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { ccAlert_(code + ': ' + e.message + '. Nothing sent.'); return; }
     }
-    var logSheet = ccSheet_('WhatsApp Log'), logs = [];
+    var logSheet = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), notReached = 0;
     for (var i = 0; i < ready.length; i++) {
+      if (Date.now() - t0 > 270000) { notReached = ready.length - i; break; }   // stay inside the 6-minute limit
       var r = ready[i], components;
       try {
         components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }), header);
@@ -227,7 +228,8 @@ function waSendSelected() {
   } finally {
     lock.releaseLock();
   }
-  ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') + skipText);
+  ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') +
+    (notReached ? '\n\n' + notReached + ' not sent yet (time limit): select them again and repeat.' : '') + skipText);
 }
 
 function waSaveToken() {
@@ -397,8 +399,8 @@ function waLogHeaders_(logSheet) {
 function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, logs, text) {
   var C = CC.COL;
   waLogHeaders_(logSheet);
-  sh.getRange(rowNo, C.WA_STATUS).setValue(WA.SENDING);
-  SpreadsheetApp.flush();
+  // No "Sending..." write + flush here: on big tabs (SB, 85,000 rows) every flush recalculates the
+  // working-tab formulas (~50 s), which made "Send to selected rows" stop after 5-10 messages (6-minute limit).
   var res = waGraph_(setup.phoneId + '/messages', token, 'post', {
     messaging_product: 'whatsapp', recipient_type: 'individual', to: to, type: 'template',
     template: { name: setup.template, language: { code: setup.language }, components: components }
