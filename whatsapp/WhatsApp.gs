@@ -211,7 +211,9 @@ function waSendSelected() {
     if (parsed.header) {
       try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { ccAlert_(code + ': ' + e.message + '. Nothing sent.'); return; }
     }
-    var logSheet = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), notReached = 0;
+    var realLog = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), notReached = 0;
+    waLogHeaders_(realLog);
+    var logSheet = { pending: [] };                        // log rows are written once at the end (see waLogAppend_)
     for (var i = 0; i < ready.length; i++) {
       if (Date.now() - t0 > 270000) { notReached = ready.length - i; break; }   // stay inside the 6-minute limit
       var r = ready[i], components;
@@ -226,6 +228,7 @@ function waSendSelected() {
       if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) break; }
     }
   } finally {
+    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending);
     lock.releaseLock();
   }
   ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') +
@@ -395,10 +398,23 @@ function waLogHeaders_(logSheet) {
   if (String(logSheet.getRange(1, 8).getValue()) !== 'To') logSheet.getRange(1, 8, 1, 2).setValues([['To', 'Text']]).setFontWeight('bold');
 }
 
+/**
+ * WhatsApp Log rows are collected and written in one go: appendRow() after every message forced Google to
+ * recalculate the big working tabs first (SB: ~20-50 s per message), so a 30-row send stopped at the time limit.
+ */
+function waLogAppend_(logSheet, row) {
+  if (logSheet.pending) logSheet.pending.push(row); else logSheet.appendRow(row);
+}
+function waLogFlush_(log, rows) {
+  if (!rows.length) return;
+  log.getRange(log.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  rows.length = 0;
+}
+
 /** Sends one template message and writes status + log. Returns {ok, stop}. */
 function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, logs, text) {
   var C = CC.COL;
-  waLogHeaders_(logSheet);
+  if (!logSheet.pending) waLogHeaders_(logSheet);
   // No "Sending..." write + flush here: on big tabs (SB, 85,000 rows) every flush recalculates the
   // working-tab formulas (~50 s), which made "Send to selected rows" stop after 5-10 messages (6-minute limit).
   var res = waGraph_(setup.phoneId + '/messages', token, 'post', {
@@ -411,13 +427,13 @@ function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, log
     var id = res.body.messages[0].id;
     sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Sent', stamp, id]]);
     var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id, to, String(text || '').slice(0, 1500)];
-    logSheet.appendRow(entry); logs.push(entry);
+    waLogAppend_(logSheet, entry); logs.push(entry);
     ibTouch_();
     return { ok: true, stop: false, id: id };
   }
   var cls = waClassifyError_(res.code, res.body);
   sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[cls.status, stamp, cls.message]]);
-  logSheet.appendRow([stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message, to, String(text || '').slice(0, 1500)]);
+  waLogAppend_(logSheet, [stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message, to, String(text || '').slice(0, 1500)]);
   ibTouch_();
   return { ok: false, stop: cls.message.indexOf('Access token') === 0 || cls.status === 'Retry', message: cls.message };
 }
@@ -429,8 +445,10 @@ function waRun_() {
   try {
     var C = CC.COL;
     var ctx = waContext_();
-    var logSheet = ccSheet_('WhatsApp Log');
-    var logs = mlReadDisplay_(logSheet, 2, 1, 7);
+    var realLog = ccSheet_('WhatsApp Log');
+    var logs = mlReadDisplay_(realLog, 2, 1, 7);
+    waLogHeaders_(realLog);
+    var logSheet = { pending: [] };                        // written once at the end (see waLogAppend_)
     var budget = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
     var nowDate = new Date();
     var now = Utilities.formatDate(nowDate, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
@@ -478,6 +496,7 @@ function waRun_() {
         (ctx.live ? '' : ' (test mode: only test numbers)'));
     });
   } finally {
+    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending);
     lock.releaseLock();
   }
   return out;
