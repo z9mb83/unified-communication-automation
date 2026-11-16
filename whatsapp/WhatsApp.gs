@@ -213,7 +213,7 @@ function waSendSelected() {
     }
     var realLog = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), notReached = 0;
     waLogHeaders_(realLog);
-    var logSheet = { pending: [] };                        // log rows are written once at the end (see waLogAppend_)
+    var logSheet = { pending: [], status: [] };            // log rows + row statuses written once at the end (waStatus_)
     for (var i = 0; i < ready.length; i++) {
       if (Date.now() - t0 > 270000) { notReached = ready.length - i; break; }   // stay inside the 6-minute limit
       var r = ready[i], components;
@@ -228,7 +228,7 @@ function waSendSelected() {
       if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) break; }
     }
   } finally {
-    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending);
+    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending, logSheet.status);
     lock.releaseLock();
   }
   ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') +
@@ -405,7 +405,18 @@ function waLogHeaders_(logSheet) {
 function waLogAppend_(logSheet, row) {
   if (logSheet.pending) logSheet.pending.push(row); else logSheet.appendRow(row);
 }
-function waLogFlush_(log, rows) {
+/**
+ * The row status (R:T) is also kept in memory during a run: any pending sheet write is flushed before the next
+ * call to Meta, and on SB every flush recalculates the working tabs (~20 s per message). Written at the end
+ * (the send loops stop after 4.5 minutes, so the end is always reached).
+ */
+function waStatus_(logSheet, sh, rowNo, vals) {
+  if (logSheet.status) logSheet.status.push({ sh: sh, row: rowNo, vals: vals });
+  else sh.getRange(rowNo, CC.COL.WA_STATUS, 1, 3).setValues([vals]);
+}
+function waLogFlush_(log, rows, status) {
+  (status || []).forEach(function (s) { s.sh.getRange(s.row, CC.COL.WA_STATUS, 1, 3).setValues([s.vals]); });
+  if (status) status.length = 0;
   if (!rows.length) return;
   log.getRange(log.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   rows.length = 0;
@@ -425,14 +436,14 @@ function waSendOne_(sh, rowNo, code, to, setup, token, components, logSheet, log
   var masked = to.slice(0, 4) + '****' + to.slice(-3);
   if (res.code === 200 && res.body.messages && res.body.messages.length) {
     var id = res.body.messages[0].id;
-    sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([['Sent', stamp, id]]);
+    waStatus_(logSheet, sh, rowNo, ['Sent', stamp, id]);
     var entry = [stamp, code, String(rowNo), masked, setup.template, 'Sent', id, to, String(text || '').slice(0, 1500)];
     waLogAppend_(logSheet, entry); logs.push(entry);
     ibTouch_();
     return { ok: true, stop: false, id: id };
   }
   var cls = waClassifyError_(res.code, res.body);
-  sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[cls.status, stamp, cls.message]]);
+  waStatus_(logSheet, sh, rowNo, [cls.status, stamp, cls.message]);
   waLogAppend_(logSheet, [stamp, code, String(rowNo), masked, setup.template, cls.status, cls.message, to, String(text || '').slice(0, 1500)]);
   ibTouch_();
   return { ok: false, stop: cls.message.indexOf('Access token') === 0 || cls.status === 'Retry', message: cls.message };
@@ -448,7 +459,8 @@ function waRun_() {
     var realLog = ccSheet_('WhatsApp Log');
     var logs = mlReadDisplay_(realLog, 2, 1, 7);
     waLogHeaders_(realLog);
-    var logSheet = { pending: [] };                        // written once at the end (see waLogAppend_)
+    var logSheet = { pending: [], status: [] };            // written once at the end (see waStatus_)
+    var T0 = Date.now();                                   // stop before the 6-minute limit so the end is reached
     var budget = ccNumber_(ccSetting_('Max WhatsApp per run'), 30);
     var nowDate = new Date();
     var now = Utilities.formatDate(nowDate, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
@@ -467,7 +479,7 @@ function waRun_() {
       if (!token) { out.push(code + ': no access token saved'); return; }
 
       var sh = ccSheet_(code), rows = mlReadDisplay_(sh, 3, 1, 20), parsed = null, header = null, sent = 0, marked = 0;
-      for (var i = 0; i < rows.length && allow.allowed > 0 && budget > 0; i++) {
+      for (var i = 0; i < rows.length && allow.allowed > 0 && budget > 0 && Date.now() - T0 < 270000; i++) {
         var check = waCheckRow_(rows[i], ctx), rowNo = i + 3;
         if (!check.send) {
           if (check.status) { sh.getRange(rowNo, C.WA_STATUS, 1, 3).setValues([[check.status, '', check.note || '']]); marked++; }
@@ -496,7 +508,7 @@ function waRun_() {
         (ctx.live ? '' : ' (test mode: only test numbers)'));
     });
   } finally {
-    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending);
+    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending, logSheet.status);
     lock.releaseLock();
   }
   return out;
