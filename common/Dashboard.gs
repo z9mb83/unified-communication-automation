@@ -174,16 +174,40 @@ function dbSnapshot_(ss, nowDate) {
 function dbReport_(ss, nowDate) {
   var now = Utilities.formatDate(nowDate, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm'), out = [];
   var MAIL = ['Sent', 'Failed', 'Bounced', 'Unsubscribed'];
+  var t = function (v, n) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n || 200); };
   CC.BRANDS.forEach(function (b) {
     var sh = ss.getSheetByName(b[0]);
     if (!sh) return;
-    mlReadDisplay_(sh, 3, 1, 24).forEach(function (r, i) {
+    var last = sh.getLastRow();
+    if (last < 3) return;
+    // Big tabs (SB has ~85,000 rows): read only the status columns first (F:G mail, R:S WhatsApp), then the
+    // full rows of the leads that were contacted. Reading every full row took too long for the dashboard.
+    var n = last - 2, mailCols = sh.getRange(3, 6, n, 2).getDisplayValues(), waCols = sh.getRange(3, 18, n, 2).getDisplayValues();
+    var hit = [];
+    for (var i = 0; i < n; i++) {
+      var mailed = MAIL.indexOf(String(mailCols[i][0]).trim()) !== -1 || !!String(mailCols[i][1]).trim();
+      var ws = String(waCols[i][0]).trim(), whatsapped = !!ws && ws !== 'Waiting (test mode)';
+      if (mailed || whatsapped) hit.push(i);
+    }
+    var rowsOf = {};
+    if (hit.length > n / 3) {                                   // most rows needed: one read is faster
+      var all = sh.getRange(3, 1, n, 24).getDisplayValues();
+      hit.forEach(function (i) { rowsOf[i] = all[i]; });
+    } else {
+      for (var k = 0; k < hit.length;) {                        // read runs of nearby rows together
+        var a = hit[k], z = a;
+        while (k + 1 < hit.length && hit[k + 1] - z <= 20) z = hit[++k];
+        k++;
+        sh.getRange(3 + a, 1, z - a + 1, 24).getDisplayValues().forEach(function (r, j) { rowsOf[a + j] = r; });
+      }
+    }
+    hit.forEach(function (i) {
+      var r = rowsOf[i];
       var mailStatus = String(r[5] || '').trim(), mailAt = dbStamp_(r[6]);
       var waStatus = String(r[17] || '').trim(), waAt = dbStamp_(r[18]);
       var mailed = MAIL.indexOf(mailStatus) !== -1 || !!mailAt;
       var whatsapped = !!waStatus && waStatus !== 'Waiting (test mode)';
       if (!mailed && !whatsapped) return;
-      var t = function (v, n) { return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n || 200); };
       out.push({
         brand: b[0], row: i + 3, name: t(r[0], 120), email: t(r[1], 120), phone: t(r[14], 30),
         mail: mailed ? { status: mailStatus, sentAt: mailAt, from: t(r[8], 80), subject: t(r[3], 160), error: t(r[7], 160),
@@ -194,6 +218,12 @@ function dbReport_(ss, nowDate) {
     });
   });
   return { generatedAt: now, timezone: 'Asia/Kolkata', leads: out };
+}
+
+/** Run from the editor: how long the report feed takes and how big it is (read-only). */
+function dbReportSelfTest() {
+  var t0 = Date.now(), r = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date());
+  Logger.log('report: ' + r.leads.length + ' leads, ' + JSON.stringify(r).length + ' characters, ' + (Date.now() - t0) + ' ms');
 }
 
 /* ============================== email replies (tracker) ============================== */
