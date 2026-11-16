@@ -220,6 +220,34 @@ function dbReport_(ss, nowDate) {
   return { generatedAt: now, timezone: 'Asia/Kolkata', leads: out };
 }
 
+/**
+ * Ready-made copy of the report data (gzip + base64 in the script cache, split into 90 KB pieces), refreshed
+ * by the 10-minute leBulkSync run. Downloads then answer in a few seconds instead of 20-30 s.
+ * The copy is used when it is less than 30 minutes old; otherwise the report is built on the spot.
+ */
+function dbReportCacheRefresh_(ss) {
+  var r = dbReport_(ss, new Date()), cache = CacheService.getScriptCache();
+  var s = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(r), 'application/json')).getBytes());
+  var parts = {}, n = 0;
+  for (var i = 0; i < s.length; i += 90000) parts['dbrep_' + (n++)] = s.slice(i, i + 90000);
+  parts.dbrep_n = String(n); parts.dbrep_at = String(Date.now());
+  cache.putAll(parts, 1800);
+  return r.leads.length + ' leads cached in ' + n + ' piece(s)';
+}
+function dbReportCached_() {
+  try {
+    var cache = CacheService.getScriptCache(), head = cache.getAll(['dbrep_n', 'dbrep_at']);
+    var n = Number(head.dbrep_n), at = Number(head.dbrep_at);
+    if (!n || !at || Date.now() - at > 30 * 60000) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push('dbrep_' + i);
+    var got = cache.getAll(keys), s = '';
+    for (var j = 0; j < n; j++) { if (!got['dbrep_' + j]) return null; s += got['dbrep_' + j]; }
+    var blob = Utilities.newBlob(Utilities.base64Decode(s), 'application/x-gzip');
+    return JSON.parse(Utilities.ungzip(blob).getDataAsString());
+  } catch (e) { return null; }
+}
+
 /** Run from the editor: how long the report feed takes and how big it is (read-only). */
 function dbReportSelfTest() {
   var t0 = Date.now(), r = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date());
@@ -288,7 +316,7 @@ function doGet(e) {
     try { out = dbMailThreads_(SpreadsheetApp.openById(CC_SHEET_ID_())); }
     catch (err) { out = { error: 'mail threads failed: ' + String(err.message || err).slice(0, 200) }; }
   } else if (e.parameter.report === 'leads') {
-    try { out = dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date()); }
+    try { out = dbReportCached_() || dbReport_(SpreadsheetApp.openById(CC_SHEET_ID_()), new Date()); }
     catch (err) { out = { error: 'report failed: ' + String(err.message || err).slice(0, 200) }; }
   } else {
     var cache = null, hit = null;

@@ -376,6 +376,10 @@ function leBulkSync() {
       if (sh) { out.push(b + ' ' + k + ': ' + leBulk_(sh, { brand: b, kind: k })); leRoom_(sh, { brand: b, kind: k }); }
     });
   });
+  // also refresh the dashboard's ready-made report data (Dashboard.gs), so "Download report" is quick
+  if (typeof dbReportCacheRefresh_ === 'function' && Date.now() - t0 < 300000) {
+    try { out.push('Report cache: ' + dbReportCacheRefresh_(ss)); } catch (e) { out.push('Report cache: ' + e.message); }
+  }
   Logger.log(out.join('\n'));
   return out.join('\n');
 }
