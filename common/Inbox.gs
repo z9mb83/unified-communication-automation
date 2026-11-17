@@ -351,12 +351,13 @@ function ibPost_(e) {
   var out;
   if (!dbKeyOk_(e.parameter.key)) out = { ok: false, message: 'unauthorized' };
   else {
-    var lock = LockService.getScriptLock();
+    var lock = LockService.getScriptLock(), a = e.parameter.action;
+    // read-only questions from the dashboard do not wait for the lock (two at once used to time out)
+    var readOnly = ['brands', 'mailbrands', 'queue', 'mailqueue', 'rowstatus', 'mailrowstatus'].indexOf(a) !== -1;
     try {
-      lock.waitLock(25000);
+      if (!readOnly) lock.waitLock(25000);
       var p = {};
       try { p = JSON.parse((e.postData && e.postData.contents) || '{}'); } catch (err) { p = {}; }
-      var a = e.parameter.action;
       if (a === 'add') out = ibAdd_(p);
       else if (a === 'send') {
         var code = String(p.brand || '').toUpperCase(), row = Number(p.row) || 0;
