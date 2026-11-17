@@ -201,38 +201,43 @@ function waSendSelected() {
 
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) { ccAlert_('Another WhatsApp run is in progress. Try again in a minute.'); return; }
-  var sent = 0, failed = [];
+  var res;
+  try { res = waSendReady_(sh, code, ready, setup, token); }
+  finally { lock.releaseLock(); }
+  if (res.error) { ccAlert_(res.error); return; }
+  ccAlert_('WhatsApp: ' + res.sent + ' sent' + (res.failed.length ? ', ' + res.failed.length + ' failed\n\n' + res.failed.slice(0, 10).join('\n') : '') +
+    (res.notReached ? '\n\n' + res.notReached + ' not sent yet (time limit): select them again and repeat.' : '') + skipText);
+}
+
+/**
+ * Sends the template to rows already checked with waForceCheck_ ({row, data, to}). The caller holds the script
+ * lock. Used by "Send WhatsApp to selected rows" and the dashboard's "Send next 30" (Inbox.gs).
+ * Returns {sent, failed: [text], notReached, error}.
+ */
+function waSendReady_(sh, code, ready, setup, token, maxMs) {
+  var sent = 0, failed = [], notReached = 0, parsed, header = null;
+  try { parsed = waFetchTemplate_(setup, token); } catch (e) { return { error: code + ': template problem - ' + e.message }; }
+  if (parsed.status !== 'APPROVED') return { error: code + ': template status is ' + parsed.status + '. Nothing sent.' };
+  if (!parsed.supported) return { error: code + ': template not supported - ' + parsed.reason };
+  if (parsed.header) {
+    try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { return { error: code + ': ' + e.message + '. Nothing sent.' }; }
+  }
+  var realLog = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), limitMs = maxMs || 270000;
+  waLogHeaders_(realLog);
+  var logSheet = { pending: [], status: [] };              // log rows + row statuses written once at the end (waStatus_)
   try {
-    var parsed;
-    try { parsed = waFetchTemplate_(setup, token); } catch (e) { ccAlert_(code + ': template problem - ' + e.message); return; }
-    if (parsed.status !== 'APPROVED') { ccAlert_(code + ': template status is ' + parsed.status + '. Nothing sent.'); return; }
-    if (!parsed.supported) { ccAlert_(code + ': template not supported - ' + parsed.reason); return; }
-    var header = null;
-    if (parsed.header) {
-      try { header = waHeaderRef_(setup, token, parsed.header); } catch (e) { ccAlert_(code + ': ' + e.message + '. Nothing sent.'); return; }
-    }
-    var realLog = ccSheet_('WhatsApp Log'), logs = [], t0 = Date.now(), notReached = 0;
-    waLogHeaders_(realLog);
-    var logSheet = { pending: [], status: [] };            // log rows + row statuses written once at the end (waStatus_)
     for (var i = 0; i < ready.length; i++) {
-      if (Date.now() - t0 > 270000) { notReached = ready.length - i; break; }   // stay inside the 6-minute limit
-      var r = ready[i], components;
-      try {
-        components = waBuildComponents_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; }), header);
-      } catch (e) {
-        sh.getRange(r.row, CC.COL.WA_STATUS, 1, 3).setValues([['Failed', '', e.message]]);
-        failed.push('Row ' + r.row + ': ' + e.message); continue;
-      }
-      var res = waSendOne_(sh, r.row, code, r.to, setup, token, components, logSheet, logs,
-        waTemplateText_(parsed, setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; })));
-      if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) break; }
+      if (Date.now() - t0 > limitMs) { notReached = ready.length - i; break; }   // stay inside the time limit
+      var r = ready[i], components, vars = setup.varCols.map(function (c) { return c ? r.data[c - 1] : ''; });
+      try { components = waBuildComponents_(parsed, vars, header); }
+      catch (e) { waStatus_(logSheet, sh, r.row, ['Failed', '', e.message]); failed.push('Row ' + r.row + ': ' + e.message); continue; }
+      var res = waSendOne_(sh, r.row, code, r.to, setup, token, components, logSheet, logs, waTemplateText_(parsed, vars));
+      if (res.ok) sent++; else { failed.push('Row ' + r.row + ': ' + res.message); if (res.stop) { notReached = ready.length - i - 1; break; } }
     }
   } finally {
-    if (logSheet && logSheet.pending) waLogFlush_(realLog, logSheet.pending, logSheet.status);
-    lock.releaseLock();
+    waLogFlush_(realLog, logSheet.pending, logSheet.status);
   }
-  ccAlert_('WhatsApp: ' + sent + ' sent' + (failed.length ? ', ' + failed.length + ' failed\n\n' + failed.slice(0, 10).join('\n') : '') +
-    (notReached ? '\n\n' + notReached + ' not sent yet (time limit): select them again and repeat.' : '') + skipText);
+  return { sent: sent, failed: failed, notReached: notReached };
 }
 
 function waSaveToken() {

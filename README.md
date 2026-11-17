@@ -116,6 +116,14 @@ rows are processed. For big lists use the bulk processor (works in memory, 170,0
 - 12 Nov 2026: 171,932 pasted rows in SB WhatsApp -> 68,047 added, 23,339 updated, 67,501 not added (duplicates).
   SB now has ~85,000 rows; the white list ~84,000 numbers.
 
+**Dashboard: upload numbers & Send next 30 (17 Nov 2026).** WhatsApp page of the dashboard: choose a brand, upload a CSV
+or .xlsx with a phone column (header like Phone / Mobile / Number, or the column with the most phone numbers; a Name column
+is used if there). Numbers are added to the brand tab and the yellow area of `<BRAND> WhatsApp` with consent Yes; numbers
+already there get consent Yes; sent, Do Not Contact, invalid and repeated numbers are skipped. **Send next 30** sends the
+template to the next 30 numbers waiting (consent Yes, never sent, oldest row first), ignoring hours / hourly limit / gap but
+never more than the daily maximum in the Limits tab (WhatsApp: 2,000 per brand per day since 17 Nov). Code: `common/Inbox.gs`
+(`ibBulkAdd_`, `ibSendNext_`, `ibQueue_`), `whatsapp/WhatsApp.gs` (`waSendReady_`); dashboard `app/api/whatsapp`, `components/wa-bulk.js`.
+
 **Sizes.** A WhatsApp white list needs (yellow rows + numbers never typed in yellow) rows; SB WhatsApp has 189,550
 (13 Nov: 173,550 yellow + 10,856 others). When it shows `#REF!` the script adds empty rows by itself on the next edit
 (`leRoom_`). Mail tabs: SB Mail 3,000, others 2,000-4,000; add rows by hand if `#REF!`. The whole spreadsheet must stay under Google's 10 million cells.

@@ -364,6 +364,9 @@ function ibPost_(e) {
       } else if (a === 'optout') out = ibOptOut_(p);
       else if (a === 'reply') out = ibReply_(p);
       else if (a === 'mailhandled') out = dbMailHandled_(p);
+      else if (a === 'bulkadd') out = ibBulkAdd_(p);
+      else if (a === 'sendnext') out = ibSendNext_(p);
+      else if (a === 'queue') out = ibQueue_(p);
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };
@@ -372,4 +375,149 @@ function ibPost_(e) {
     }
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ============================== dashboard: upload numbers + "Send next 30" ============================== */
+
+/**
+ * Adds an uploaded list of phone numbers to a brand. p = {brand, rows: [{phone, name}]}.
+ * Uploaded numbers have WhatsApp consent (the team only uploads numbers that agreed), so:
+ *   new number                 -> new brand-tab row (name, phone, consent Yes) + a row in "<BRAND> WhatsApp" (yellow)
+ *   already there, not sent    -> consent set to Yes ("updated")
+ *   already sent / consent Yes -> left alone ("already there")
+ *   Do Not Contact / not valid / repeated in the file -> skipped
+ * Matching is on the last 10 digits, like the yellow entry tabs (LeadEntry.gs).
+ */
+function ibBulkAdd_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var list = Array.isArray(p.rows) ? p.rows : [];
+  if (!list.length) return { ok: false, message: 'No phone numbers in the file.' };
+  if (list.length > 50000) return { ok: false, message: 'Too many rows (' + list.length + '). Upload at most 50,000 at a time.' };
+  var dlock = LockService.getDocumentLock();
+  if (!dlock.tryLock(20000)) return { ok: false, message: 'The sheet is busy (another update is running). Try again in a minute.' };
+  try {
+    var ss = ccSs_(), sh = ccSheet_(code), C = CC.COL, cc = ccSetting_('Default country code') || '91', ctx = waContext_();
+    var last = Math.max(sh.getLastRow(), 2), n = last - 2;
+    var cur = n > 0 ? sh.getRange(3, C.PHONE, n, 4).getDisplayValues() : [];        // O phone, P send, Q consent, R status
+    var at = {};
+    cur.forEach(function (r, i) { var k = leKey10_(r[0]); if (k && at[k] === undefined) at[k] = i; });
+    var yt = ss.getSheetByName(code + ' WhatsApp'), inYellow = {}, yLast = 1;
+    if (yt) {
+      yLast = leLastEntry_(yt, LE.WA.phone + 1);
+      if (yLast >= 2) yt.getRange(2, LE.WA.phone + 1, yLast - 1, 1).getDisplayValues().forEach(function (r) { var k = leKey10_(r[0]); if (k) inYellow[k] = true; });
+    }
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM HH:mm');
+    var seen = {}, add = [], yellow = [], consentRows = [], c = { added: 0, updated: 0, already: 0, dnc: 0, bad: 0, repeated: 0 };
+    list.forEach(function (it) {
+      var raw = String((it && it.phone) || '').trim(), name = String((it && it.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      var k = leKey10_(raw), full = ibPhone_(raw, cc);
+      if (!k || !full) { c.bad++; return; }
+      if (seen[k]) { c.repeated++; return; }
+      seen[k] = true;
+      if (ctx.dncPhones[full]) { c.dnc++; return; }
+      var i = at[k];
+      if (i !== undefined) {
+        var r = cur[i], row = i + 3;
+        if (String(r[3]).trim() === 'Sent' || ccYes_(r[2])) { c.already++; return; }
+        consentRows.push('Q' + row); c.updated++;
+        if (!inYellow[k]) { inYellow[k] = true; yellow.push([name, raw, '', 'Yes', '', 'Updated ' + code + ' row ' + row + ' (number was already there): consent Yes (dashboard upload ' + stamp + ')']); }
+        return;
+      }
+      var newRow = last + 1 + add.length;
+      add.push([name, '', '', '', '', '', '', '', '', '', '', '', '', '', raw, '', 'Yes']);
+      at[k] = -1; c.added++;
+      if (!inYellow[k]) { inYellow[k] = true; yellow.push([name, raw, '', 'Yes', '', 'Added to ' + code + ' row ' + newRow + ' (dashboard upload ' + stamp + ')']); }
+    });
+    if (add.length) {
+      if (last + add.length > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), last + add.length - sh.getMaxRows() + 500);
+      sh.getRange(last + 1, C.PHONE, add.length, 1).setNumberFormat('@');
+      sh.getRange(last + 1, 1, add.length, 17).setValues(add);
+    }
+    for (var j = 0; j < consentRows.length; j += 1000) sh.getRangeList(consentRows.slice(j, j + 1000)).setValue('Yes');
+    if (yt && yellow.length) {
+      var y0 = Math.max(yLast, 1) + 1;
+      if (y0 + yellow.length > yt.getMaxRows()) yt.insertRowsAfter(yt.getMaxRows(), y0 + yellow.length - yt.getMaxRows() + 1000);
+      yt.getRange(y0, LE.WA.phone + 1, yellow.length, 1).setNumberFormat('@');
+      yt.getRange(y0, 1, yellow.length, LE.WA.width).setValues(yellow);
+    }
+    ibTouch_();
+    var msg = c.added + ' added, ' + c.updated + ' existing set to consent Yes, ' + c.already + ' already there' +
+      (c.dnc ? ', ' + c.dnc + ' in Do Not Contact' : '') + (c.bad ? ', ' + c.bad + ' not valid' : '') + (c.repeated ? ', ' + c.repeated + ' repeated in the file' : '') + '.';
+    return { ok: true, brand: code, counts: c, message: msg };
+  } finally { dlock.releaseLock(); }
+}
+
+/** Rows of a brand that "Send next" would use: consent Yes, never sent, valid, not Do Not Contact; in sheet order. */
+function ibNextRows_(code, ctx, limit) {
+  var sh = ccSheet_(code), C = CC.COL, last = sh.getLastRow(), out = [], waiting = 0, sentKeys = {};
+  if (last < 3) return { sh: sh, rows: out, waiting: 0 };
+  var v = sh.getRange(3, C.PHONE, last - 2, 4).getDisplayValues();                    // O phone, P send, Q consent, R status
+  v.forEach(function (r) { if (String(r[3]).trim() === 'Sent') { var k = leKey10_(r[0]); if (k) sentKeys[k] = true; } });
+  var taken = {};
+  for (var i = 0; i < v.length; i++) {
+    var r = v[i];
+    if (String(r[3]).trim() !== '' || !ccYes_(r[2])) continue;
+    var k = leKey10_(r[0]);
+    if (!k || sentKeys[k] || taken[k]) continue;
+    var full = ibPhone_(r[0], ctx.cc);
+    if (!full || ctx.dncPhones[full]) continue;
+    taken[k] = true; waiting++;
+    if (out.length < limit) out.push(i + 3);
+  }
+  return { sh: sh, rows: out, waiting: waiting };
+}
+
+function ibSentToday_(code) {
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd'), n = 0, log = ccSheet_('WhatsApp Log');
+  var last = log.getLastRow();
+  if (last < 2) return 0;
+  var first = Math.max(2, last - 15000);
+  log.getRange(first, 1, last - first + 1, 6).getDisplayValues().forEach(function (r) {
+    if (String(r[1]).trim() === code && String(r[5]).trim() === 'Sent' && String(r[0]).slice(0, 10) === today) n++;
+  });
+  return n;
+}
+
+/** p = {brand}: waiting numbers, sent today, daily cap. */
+function ibQueue_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var ctx = waContext_(), lim = ccLimits_(code, 'WhatsApp') || {}, q = ibNextRows_(code, ctx, 0);
+  return { ok: true, brand: code, waiting: q.waiting, sentToday: ibSentToday_(code), perDay: lim.perDay || 0, on: lim.on !== false, live: ctx.live };
+}
+
+/**
+ * "Send next 30": sends the template to the next numbers waiting (consent Yes, never sent), in sheet order.
+ * Ignores the hourly limit, gap and sending hours like "Send to selected rows", but never goes over the daily
+ * maximum in the Limits tab. Stops after ~50 s so the dashboard gets an answer; the rest is sent by the next click.
+ */
+function ibSendNext_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var want = Math.max(1, Math.min(30, Number(p.count) || 30));
+  var lim = ccLimits_(code, 'WhatsApp');
+  if (lim && !lim.on) return { ok: false, message: 'WhatsApp is OFF for ' + code + ' (Limits tab).' };
+  var setup = waSetup_(code), token = waToken_(code);
+  if (!setup || !setup.phoneId || !setup.waba || !setup.template) return { ok: false, message: code + ': WhatsApp Setup is incomplete.' };
+  if (!token) return { ok: false, message: 'No WhatsApp access token saved.' };
+  var ctx = waContext_();
+  if (!ctx.live) return { ok: false, message: 'Live sending is off (Settings tab): nothing sent.' };
+  var today = ibSentToday_(code), room = lim && lim.perDay > 0 ? lim.perDay - today : want;
+  if (room <= 0) return { ok: false, message: code + ': daily limit reached (' + today + ' of ' + lim.perDay + ' sent today).' };
+  var n = Math.min(want, room), q = ibNextRows_(code, ctx, n);
+  if (!q.rows.length) return { ok: true, sent: 0, waiting: 0, message: 'Nobody is waiting: every number with consent has been sent.' };
+  var ready = [];
+  q.rows.forEach(function (rowNo) {
+    var row = q.sh.getRange(rowNo, 1, 1, 20).getDisplayValues()[0], check = waForceCheck_(row, ctx);
+    if (check.send) ready.push({ row: rowNo, data: row, to: check.to });
+  });
+  var res = waSendReady_(q.sh, code, ready, setup, token, 45000);
+  if (res.error) return { ok: false, message: res.error };
+  ibTouch_();
+  var left = Math.max(0, q.waiting - res.sent);
+  return { ok: true, sent: res.sent, failed: res.failed.length, notReached: res.notReached, waiting: left,
+    sentToday: today + res.sent, perDay: lim ? lim.perDay : 0,
+    message: res.sent + ' sent' + (res.failed.length ? ', ' + res.failed.length + ' failed (' + res.failed.slice(0, 3).join('; ') + ')' : '') +
+      (res.notReached ? ', ' + res.notReached + ' left for the next click (time limit)' : '') + '. ' + left + ' still waiting.' };
 }
