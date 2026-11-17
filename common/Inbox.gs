@@ -367,6 +367,8 @@ function ibPost_(e) {
       else if (a === 'bulkadd') out = ibBulkAdd_(p);
       else if (a === 'sendnext') out = ibSendNext_(p);
       else if (a === 'queue') out = ibQueue_(p);
+      else if (a === 'brands') out = ibBrands_();
+      else if (a === 'rowstatus') out = ibRowStatus_(p);
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };
@@ -409,24 +411,25 @@ function ibBulkAdd_(p) {
     }
     var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM HH:mm');
     var seen = {}, add = [], yellow = [], consentRows = [], c = { added: 0, updated: 0, already: 0, dnc: 0, bad: 0, repeated: 0 };
+    var results = [];                                          // [phone, name, result, brand row, WhatsApp status] for the dashboard table
     list.forEach(function (it) {
       var raw = String((it && it.phone) || '').trim(), name = String((it && it.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
       var k = leKey10_(raw), full = ibPhone_(raw, cc);
-      if (!k || !full) { c.bad++; return; }
-      if (seen[k]) { c.repeated++; return; }
+      if (!k || !full) { c.bad++; results.push([raw, name, 'Not valid', '', '']); return; }
+      if (seen[k]) { c.repeated++; results.push([raw, name, 'Repeated in file', '', '']); return; }
       seen[k] = true;
-      if (ctx.dncPhones[full]) { c.dnc++; return; }
+      if (ctx.dncPhones[full]) { c.dnc++; results.push([raw, name, 'Do Not Contact', '', '']); return; }
       var i = at[k];
       if (i !== undefined) {
         var r = cur[i], row = i + 3;
-        if (String(r[3]).trim() === 'Sent' || ccYes_(r[2])) { c.already++; return; }
-        consentRows.push('Q' + row); c.updated++;
+        if (String(r[3]).trim() === 'Sent' || ccYes_(r[2])) { c.already++; results.push([raw, name, 'Already there', row, String(r[3]).trim()]); return; }
+        consentRows.push('Q' + row); c.updated++; results.push([raw, name, 'Consent set to Yes', row, String(r[3]).trim()]);
         if (!inYellow[k]) { inYellow[k] = true; yellow.push([name, raw, '', 'Yes', '', 'Updated ' + code + ' row ' + row + ' (number was already there): consent Yes (dashboard upload ' + stamp + ')']); }
         return;
       }
       var newRow = last + 1 + add.length;
       add.push([name, '', '', '', '', '', '', '', '', '', '', '', '', '', raw, '', 'Yes']);
-      at[k] = -1; c.added++;
+      at[k] = -1; c.added++; results.push([raw, name, 'Added', newRow, '']);
       if (!inYellow[k]) { inYellow[k] = true; yellow.push([name, raw, '', 'Yes', '', 'Added to ' + code + ' row ' + newRow + ' (dashboard upload ' + stamp + ')']); }
     });
     if (add.length) {
@@ -444,7 +447,7 @@ function ibBulkAdd_(p) {
     ibTouch_();
     var msg = c.added + ' added, ' + c.updated + ' existing set to consent Yes, ' + c.already + ' already there' +
       (c.dnc ? ', ' + c.dnc + ' in Do Not Contact' : '') + (c.bad ? ', ' + c.bad + ' not valid' : '') + (c.repeated ? ', ' + c.repeated + ' repeated in the file' : '') + '.';
-    return { ok: true, brand: code, counts: c, message: msg };
+    return { ok: true, brand: code, counts: c, message: msg, results: results };
   } finally { dlock.releaseLock(); }
 }
 
@@ -520,4 +523,41 @@ function ibSendNext_(p) {
     sentToday: today + res.sent, perDay: lim ? lim.perDay : 0,
     message: res.sent + ' sent' + (res.failed.length ? ', ' + res.failed.length + ' failed (' + res.failed.slice(0, 3).join('; ') + ')' : '') +
       (res.notReached ? ', ' + res.notReached + ' left for the next click (time limit)' : '') + '. ' + left + ' still waiting.' };
+}
+
+/** Brand cards for the dashboard's Send WhatsApp page: logo (WhatsApp Setup > Header media URL), template, queue. */
+function ibBrands_() {
+  var ctx = waContext_(), today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd'), sent = {};
+  var log = ccSheet_('WhatsApp Log'), last = log.getLastRow();
+  if (last >= 2) {
+    var first = Math.max(2, last - 15000);
+    log.getRange(first, 1, last - first + 1, 6).getDisplayValues().forEach(function (r) {
+      if (String(r[5]).trim() === 'Sent' && String(r[0]).slice(0, 10) === today) sent[String(r[1]).trim()] = (sent[String(r[1]).trim()] || 0) + 1;
+    });
+  }
+  var brands = CC.BRANDS.map(function (b) {
+    var code = b[0], setup = waSetup_(code) || {}, lim = ccLimits_(code, 'WhatsApp') || {}, q = ibNextRows_(code, ctx, 0);
+    var m = /(?:file\/d\/|open\?id=|[?&]id=)([\w-]{20,})/.exec(setup.headerUrl || '');
+    return { code: code, name: b[2], template: setup.template || '', logoId: m ? m[1] : '',
+      logoUrl: m ? '' : (/^https:\/\//.test(setup.headerUrl || '') ? setup.headerUrl : ''),
+      waiting: q.waiting, sentToday: sent[code] || 0, perDay: lim.perDay || 0, on: lim.on !== false };
+  });
+  return { ok: true, live: ctx.live, brands: brands };
+}
+
+/** p = {brand, rows: [brand-tab row numbers]} -> {ok, status: {row: [WhatsApp status, sent at, delivery]}} */
+function ibRowStatus_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var rows = (Array.isArray(p.rows) ? p.rows : []).map(Number).filter(function (n) { return n >= 3; }).sort(function (a, b) { return a - b; });
+  var sh = ccSheet_(code), C = CC.COL, out = {};
+  for (var k = 0; k < rows.length && k < 20000;) {                // read runs of nearby rows together
+    var a = rows[k], z = a;
+    while (k + 1 < rows.length && rows[k + 1] - z <= 50) z = rows[++k];
+    k++;
+    sh.getRange(a, C.WA_STATUS, z - a + 1, 4).getDisplayValues().forEach(function (r, j) { out[a + j] = [r[0], r[1], r[3]]; });
+  }
+  var status = {};
+  rows.forEach(function (n) { if (out[n]) status[n] = out[n]; });
+  return { ok: true, status: status };
 }
