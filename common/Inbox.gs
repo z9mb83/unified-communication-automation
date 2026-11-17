@@ -369,6 +369,11 @@ function ibPost_(e) {
       else if (a === 'queue') out = ibQueue_(p);
       else if (a === 'brands') out = ibBrands_();
       else if (a === 'rowstatus') out = ibRowStatus_(p);
+      else if (a === 'mailbulkadd') out = ibMailBulkAdd_(p);
+      else if (a === 'mailqueue') out = ibMailQueue_(p);
+      else if (a === 'mailsendnext') out = ibMailSendNext_(p);
+      else if (a === 'mailrowstatus') out = ibMailRowStatus_(p);
+      else if (a === 'mailbrands') out = ibMailBrands_();
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };
@@ -560,4 +565,145 @@ function ibRowStatus_(p) {
   var status = {};
   rows.forEach(function (n) { if (out[n]) status[n] = out[n]; });
   return { ok: true, status: status };
+}
+
+/* ============================== dashboard: Send Email (same flow as WhatsApp) ============================== */
+
+/**
+ * Adds an uploaded email list to a brand. p = {brand, rows: [{email, name, details}]}.
+ * New email -> brand-tab row (A name, B email, C details) + a row in "<BRAND> Mail" (yellow) so the working tab lines up.
+ * Already in the brand tab / Do Not Contact / not valid / repeated in the file -> skipped. The mail sender drafts them as usual.
+ */
+function ibMailBulkAdd_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var list = Array.isArray(p.rows) ? p.rows : [];
+  if (!list.length) return { ok: false, message: 'No email addresses in the file.' };
+  if (list.length > 50000) return { ok: false, message: 'Too many rows (' + list.length + '). Upload at most 50,000 at a time.' };
+  var dlock = LockService.getDocumentLock();
+  if (!dlock.tryLock(20000)) return { ok: false, message: 'The sheet is busy (another update is running). Try again in a minute.' };
+  try {
+    var ss = ccSs_(), sh = ccSheet_(code), C = CC.COL;
+    var last = Math.max(sh.getLastRow(), 2), n = last - 2;
+    var cur = n > 0 ? sh.getRange(3, C.EMAIL, n, 5).getDisplayValues() : [];         // B email ... F status
+    var at = {};
+    cur.forEach(function (r, i) { var e = String(r[0]).trim().toLowerCase(); if (e && at[e] === undefined) at[e] = i; });
+    var dnc = {};
+    mlReadDisplay_(ccSheet_('Do Not Contact'), 2, 1, 1).forEach(function (r) { var e = String(r[0]).trim().toLowerCase(); if (e) dnc[e] = true; });
+    var yt = ss.getSheetByName(code + ' Mail'), inYellow = {}, yLast = 1;
+    if (yt) {
+      yLast = leLastEntry_(yt, LE.MAIL.email + 1);
+      if (yLast >= 2) yt.getRange(2, LE.MAIL.email + 1, yLast - 1, 1).getDisplayValues().forEach(function (r) { var e = String(r[0]).trim().toLowerCase(); if (e) inYellow[e] = true; });
+    }
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM HH:mm');
+    var seen = {}, add = [], yellow = [], results = [], c = { added: 0, already: 0, dnc: 0, bad: 0, repeated: 0 };
+    list.forEach(function (it) {
+      var raw = String((it && it.email) || '').trim(), email = raw.toLowerCase();
+      var name = String((it && it.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      var details = String((it && it.details) || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!leEmailOk_(email)) { c.bad++; results.push([raw, name, 'Not valid', '', '']); return; }
+      if (seen[email]) { c.repeated++; results.push([raw, name, 'Repeated in file', '', '']); return; }
+      seen[email] = true;
+      if (dnc[email]) { c.dnc++; results.push([raw, name, 'Do Not Contact', '', '']); return; }
+      if (at[email] !== undefined) { var i = at[email]; c.already++; results.push([raw, name, 'Already there', i + 3, String(cur[i][4]).trim()]); return; }
+      var newRow = last + 1 + add.length;
+      add.push([name, email, details]);
+      at[email] = -1; c.added++; results.push([raw, name, 'Added', newRow, '']);
+      if (!inYellow[email]) { inYellow[email] = true; yellow.push([name, email, details, '', 'Added to ' + code + ' row ' + newRow + ' (dashboard upload ' + stamp + ')']); }
+    });
+    if (add.length) {
+      if (last + add.length > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), last + add.length - sh.getMaxRows() + 500);
+      sh.getRange(last + 1, 1, add.length, 3).setValues(add);
+    }
+    if (yt && yellow.length) {
+      var y0 = Math.max(yLast, 1) + 1;
+      if (y0 + yellow.length > yt.getMaxRows()) yt.insertRowsAfter(yt.getMaxRows(), y0 + yellow.length - yt.getMaxRows() + 1000);
+      yt.getRange(y0, 1, yellow.length, LE.MAIL.width).setValues(yellow);
+    }
+    var msg = c.added + ' added, ' + c.already + ' already there' + (c.dnc ? ', ' + c.dnc + ' in Do Not Contact' : '') +
+      (c.bad ? ', ' + c.bad + ' not valid' : '') + (c.repeated ? ', ' + c.repeated + ' repeated in the file' : '') + '.';
+    return { ok: true, brand: code, counts: c, message: msg, results: results };
+  } finally { dlock.releaseLock(); }
+}
+
+/** Email rows "Send next" would use: valid email, never tried (no status), not Do Not Contact, not already queued; sheet order. */
+function ibMailNextRows_(code, limit) {
+  var sh = ccSheet_(code), C = CC.COL, last = sh.getLastRow(), out = [], waiting = 0;
+  if (last < 3) return { sh: sh, rows: out, waiting: 0, dnc: {}, queued: {} };
+  var dnc = {}, queued = {};
+  mlReadDisplay_(ccSheet_('Do Not Contact'), 2, 1, 1).forEach(function (r) { var e = String(r[0]).trim().toLowerCase(); if (e) dnc[e] = true; });
+  var q = ccSs_().getSheetByName(ML_SEND.TAB);
+  if (q) mlReadDisplay_(q, 2, 1, 8).forEach(function (r) { if (r[1] === code && r[5] === 'Pending') queued[String(r[3]).toLowerCase()] = true; });
+  var v = sh.getRange(3, C.EMAIL, last - 2, 5).getDisplayValues(), seen = {};          // B email ... F status
+  for (var i = 0; i < v.length; i++) {
+    var e = String(v[i][0]).trim().toLowerCase();
+    if (!e || String(v[i][4]).trim() !== '' || seen[e] || dnc[e] || queued[e] || !leEmailOk_(e)) continue;
+    seen[e] = true; waiting++;
+    if (out.length < limit) out.push(i + 3);
+  }
+  return { sh: sh, rows: out, waiting: waiting, dnc: dnc, queued: queued };
+}
+
+/** p = {brand}: waiting, sent today, mailbox room left today, mail on/off. */
+function ibMailQueue_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var lim = ccLimits_(code, 'Mail') || {}, q = ibMailNextRows_(code, 0), pending = Object.keys(q.queued).length;
+  return { ok: true, brand: code, waiting: q.waiting, pending: pending, on: lim.on !== false };
+}
+
+/**
+ * "Send next 25" for email: queues the next rows in "Mail Send Now" and starts the Cloud Run mail job, exactly like
+ * AUTOMATION > Mail > Send mail to selected rows. Rows without a draft get an AI draft that is sent without review.
+ * Mailbox daily limits still apply (rows over the limit stay queued for the next run).
+ */
+function ibMailSendNext_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var lim = ccLimits_(code, 'Mail');
+  if (lim && !lim.on) return { ok: false, message: 'Mail is OFF for ' + code + ' (Limits tab).' };
+  var q = ibMailNextRows_(code, ML_SEND.MAX);
+  if (!q.rows.length) return { ok: true, queued: 0, waiting: 0, message: 'Nobody is waiting: every email address has been emailed or is queued.' };
+  var now = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'), lines = [];
+  q.rows.forEach(function (n) {
+    var row = q.sh.getRange(n, 1, 1, 12).getDisplayValues()[0];
+    if (mlSendCheck_(row, q.dnc, q.queued)) return;
+    q.queued[String(row[1]).trim().toLowerCase()] = true;
+    lines.push([now, code, String(n), String(row[1]).trim().toLowerCase(), 'dashboard', 'Pending', '', '']);
+  });
+  if (!lines.length) return { ok: true, queued: 0, waiting: q.waiting, message: 'Nothing to send.' };
+  var qs = ccEnsureTab_(ML_SEND.TAB, ML_SEND.HEADERS, { hidden: true, text: true }).sheet;
+  qs.getRange(qs.getLastRow() + 1, 1, lines.length, 8).setNumberFormat('@').setValues(lines);
+  SpreadsheetApp.flush();
+  var started = mlStartMailJob_();
+  return { ok: true, queued: lines.length, waiting: Math.max(0, q.waiting - lines.length),
+    message: lines.length + ' queued. ' + (started.ok ? 'Sending started: they turn "Sent" in about 2 minutes (mailbox daily limits apply).'
+      : 'Could not start the mail tool now (' + started.msg + '); the next scheduled run sends them (every 5 min, 10:00-18:00 Mon-Sat).') };
+}
+
+/** p = {brand, rows} -> {ok, status: {row: [email status, sent at, error/replied]}} */
+function ibMailRowStatus_(p) {
+  var code = String(p.brand || '').trim().toUpperCase();
+  if (!ccBrand_(code)) return { ok: false, message: 'Choose a brand.' };
+  var rows = (Array.isArray(p.rows) ? p.rows : []).map(Number).filter(function (n) { return n >= 3; }).sort(function (a, b) { return a - b; });
+  var sh = ccSheet_(code), out = {};
+  for (var k = 0; k < rows.length && k < 20000;) {
+    var a = rows[k], z = a;
+    while (k + 1 < rows.length && rows[k + 1] - z <= 50) z = rows[++k];
+    k++;
+    sh.getRange(a, 6, z - a + 1, 8).getDisplayValues().forEach(function (r, j) {   // F status, G sent at, H error ... M replied
+      out[a + j] = [r[0], r[1], ccYes_(r[7]) ? 'Replied' : r[2]];
+    });
+  }
+  var status = {};
+  rows.forEach(function (n) { if (out[n]) status[n] = out[n]; });
+  return { ok: true, status: status };
+}
+
+/** Email side of the Send page: per brand how many addresses are waiting / queued, plus mail on/off. */
+function ibMailBrands_() {
+  return { ok: true, brands: CC.BRANDS.map(function (b) {
+    var code = b[0], lim = ccLimits_(code, 'Mail') || {}, q = ibMailNextRows_(code, 0);
+    return { code: code, name: b[2], waiting: q.waiting, pending: Object.keys(q.queued).length, on: lim.on !== false };
+  }) };
 }
