@@ -10,6 +10,7 @@
 var CC = {
   MENU: 'AUTOMATION',
   OLD_EMAIL_SHEET_ID: '18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI',
+  DASHBOARD_URL: 'https://automation-dashboard-pi-ten.vercel.app',   // web dashboard (repo automation-dashboard on Vercel)
   // code, brand id, name, old lead tab, old control tab, old send log, old suppression, cc email, mailboxes
   // Mailboxes must match mail/brands_master/<brand>/config.json (they need a Gmail login to send).
   BRANDS: [
@@ -49,6 +50,7 @@ var CC = {
     ['Mail switched to this sheet', 'No', 'Set to Yes by the switch-over. When Yes, importing from the old sheet is blocked.'],
     ['Last import', '', 'Updated automatically'],
     ['Automatic WhatsApp', 'Off', 'Updated by the WhatsApp menu'],
+    ['Web dashboard', 'https://automation-dashboard-pi-ten.vercel.app', 'Password-protected web dashboard (repo automation-dashboard on Vercel)'],
     ['Max dashboard WhatsApp per day', '20', 'New contacts sent from the dashboard inbox, all brands together']
   ]
 };
@@ -352,6 +354,8 @@ function ccSetupDashboard_() {
   sh.clear();
   sh.getRange('A1').setValue('AUTOMATION CONTROL CENTER — live figures from this sheet').setFontWeight('bold').setFontSize(14)
     .setNote('Automation Control Center');
+  sh.getRange('A2').setFormula('=HYPERLINK("' + CC.DASHBOARD_URL + '","Open the web dashboard: ' + CC.DASHBOARD_URL.replace('https://', '') + '")')
+    .setFontWeight('bold');
   var head = ['Brand', 'Code', 'Leads', 'Drafts waiting for approval', 'Approved, waiting to send', 'Emails sent',
     'Emails sent today', 'Email failed', 'Replied', 'WhatsApp sent', 'WhatsApp sent today', 'WhatsApp failed', 'Mail on', 'WhatsApp on'];
   sh.getRange(3, 1, 1, head.length).setValues([head]).setFontWeight('bold').setBackground('#f3f4f6').setWrap(true);

@@ -56,7 +56,8 @@ WhatsApp Log, WhatsApp Replies, Settings, Dashboard, and hidden Mail Control XX 
 - 19 Nov 2026: repo copied to GitHub account z9mb83; the dashboard gets a new Vercel project there. The sheet and Apps Script did not move.
 
 ## Related repos
-- `automation-dashboard` - the Next.js dashboard on Vercel that reads this sheet's web app.
+- `automation-dashboard` - the Next.js dashboard on Vercel that reads this sheet's web app. Live: https://automation-dashboard-pi-ten.vercel.app
+  (linked from the sheet: Dashboard tab A2 and Settings "Web dashboard").
 - `OCR` - newspaper ad OCR -> Telinfy SMS (separate sheets); SMS-ed numbers are then copied into the SB / PE tabs here for WhatsApp.
 - `multibrand-comms-platform` - an earlier, bigger plan (FastAPI + Next.js + Postgres). Not used; this sheet replaced it.
 

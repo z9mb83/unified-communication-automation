@@ -170,12 +170,13 @@ never more than the daily maximum in the Limits tab (WhatsApp: 2,000 per brand p
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
 ## Live dashboard (Vercel)
-**https://automation-dashboard-sigma-rose.vercel.app** - password protected; charts of emails, replies, WhatsApp,
+**https://automation-dashboard-pi-ten.vercel.app** - password protected; charts of emails, replies, WhatsApp,
 lead pipeline and mailbox limits for all brands, refreshed every minute. Pages: Home (totals, needs attention, sending
 costs), Mail (incl. email replies waiting), WhatsApp, SMS (Telinfy reports per template, wallet, stop list), Inbox
 (WhatsApp chats). The **cost button** (top right) shows WhatsApp (Rs 0.8631 + 18% GST per delivered template) and SMS
 (Rs 0.22 each) spend so far. Code: separate private repo
-[`automation-dashboard`](https://github.com/linkwithmarketing-design/automation-dashboard) (Next.js on Vercel, Hobby plan).
+[`automation-dashboard`](https://github.com/z9mb83/automation-dashboard) (Next.js on Vercel, Hobby plan).
+The sheet links to it at the top of the **Dashboard** tab and in **Settings** (row "Web dashboard").
 
 ```
 master sheet --(read-only)--> common/Dashboard.gs web app (JSON, needs access key)
