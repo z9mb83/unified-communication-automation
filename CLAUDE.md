@@ -44,7 +44,7 @@ WhatsApp Log, WhatsApp Replies, Settings, Dashboard, and hidden Mail Control XX 
 ## Decisions and history (from the chats with the owner)
 - Sep-Oct 2026: Gmail outreach moved from the old email sheet to this one master sheet; repo split into `mail/ whatsapp/ sms/ common/`
   so each tool can be repaired alone; limits per brand and channel live in the Limits tab.
-- Daily reports to info@99marketingservices.com: 10 AM (replies so far) and 6 PM (sent today, replies, plan for tomorrow).
+- Daily reports to info@99marketingservices.com: 10 AM (replies so far) and 6 PM (sent today, replies, plan for tomorrow). **Paused on 20 Nov 2026** in Cloud Scheduler (owner's request); resume both report triggers to restart.
 - Oct 2026: SMS parked (reverted, instructions kept). WhatsApp is cold outreach; a STOP reply puts the number in Do Not Contact.
 - 11-13 Nov 2026: staff found the wide brand tabs too complicated, so separate `<BRAND> Mail` and `<BRAND> WhatsApp` working tabs
   were added; WhatsApp yellow and white lists line up row by row.
@@ -54,6 +54,8 @@ WhatsApp Log, WhatsApp Replies, Settings, Dashboard, and hidden Mail Control XX 
 - 17 Nov 2026: dashboard upload and send-next actions (`bulkadd`, `sendnext`, `queue`, `brands`, `rowstatus` and the `mail…`
   versions) added to `common/Inbox.gs`; brand logos come from WhatsApp Setup column L (Header media URL).
 - 19 Nov 2026: repo copied to GitHub account z9mb83; the dashboard gets a new Vercel project there. The sheet and Apps Script did not move.
+- 26 Nov 2026: automatic WhatsApp batches (30 per brand every 30 min, menu WhatsApp → Turn automatic batches ON) added to the live
+  script and kept OFF; SMS gets the same in the OCR sheets. See README "How limits work".
 
 ## Related repos
 - `automation-dashboard` - the Next.js dashboard on Vercel that reads this sheet's web app. Live: https://automation-dashboard-pi-ten.vercel.app
@@ -72,7 +74,7 @@ WhatsApp Log, WhatsApp Replies, Settings, Dashboard, and hidden Mail Control XX 
 | Automation dashboard (WhatsApp, Email, SMS, reports) | https://automation-dashboard-pi-ten.vercel.app | https://vercel.com/ace-5891/automation-dashboard |
 | Send WhatsApp / Send Email / Send SMS pages | `.../#send`, `.../#email`, `.../#send-sms` | (same) |
 | Task tracker (sign-in: Admin / Task manager / Employee) | https://task-tracker-five-taupe.vercel.app (`/admin`, `/task-manager`, `/employee`) | https://vercel.com/ace-5891/task-tracker |
-| Old addresses (old Vercel account, retired; delete when no longer needed) | automation-dashboard-sigma-rose.vercel.app, task-tracker-sable-omega.vercel.app | old account |
+| Old addresses (old Vercel account) | deleted 19-20 Nov 2026 | - |
 
 Every push to `main` of the z9mb83 repo redeploys that site. Vercel settings (Settings → Environment Variables), values only in Vercel:
 - automation-dashboard: `SHEET_API_URL`, `SHEET_API_KEY`, `DASHBOARD_PASSWORD`, `TELINFY_API_KEY`, `SMS_SB_URL`, `SMS_SB_KEY`, `SMS_PE_URL`, `SMS_PE_KEY`
@@ -132,7 +134,8 @@ If the z9mb83 repo is attached to the session directly, just push a branch and o
   new Vercel projects (team ACE) for the dashboard and the task tracker with the same data (data lives in the sheets, not Vercel);
   dashboard **Send SMS** page (Send next 100 for SB/PE through the OCR sheets' own sender, `SmsApi.gs` web apps);
   links to the new sites put in the sheets (Links tabs, ACC Dashboard A2 + Settings, Task Tracker Settings "Dashboard URL").
-- Still open: delete the old Vercel projects once everyone uses the new links; the old `linkwithmarketing-design` repos can be archived.
+- 20 Nov: daily report emails paused; old Vercel projects deleted.
+- Still open: the old `linkwithmarketing-design` repos can be archived.
 
 ## Owner and how to work with him
 

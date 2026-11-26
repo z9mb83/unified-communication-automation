@@ -134,6 +134,13 @@ never more than the daily maximum in the Limits tab (WhatsApp: 2,000 per brand p
   chosen mailbox's own daily/hourly limit.
 - **WhatsApp**: runs every 5 minutes when automatic sending is on; per brand it sends up to the brand's limits
   (with a gap it sends one per run). Meta also caps new numbers (about 250 new contacts a day at first).
+- **WhatsApp automatic batches** (added 26 Nov 2026, **off** until switched on): menu WhatsApp → *Turn automatic batches ON
+  (30 per brand every 30 min)*. Every 30 minutes each brand gets the dashboard's "Send next 30" (consent Yes, never sent,
+  oldest first, so newly added numbers are picked up on the next run), inside the brand's On / hours / daily maximum
+  (Limits tab) and only when *WhatsApp live sending* is Yes. Turning it on switches off the 5-minute sender (only one timer at
+  a time); *Turn automatic sending OFF (both)* stops either. Last result: Settings row **Last WhatsApp batch**.
+  Code: `waBatchOn`, `waBatchRun_` in `whatsapp/WhatsApp.gs`; tests `common/test/batch.test.js`.
+- **SMS automatic batches** live in the OCR sheets (repo `OCR`, `src/SmsApi.gs`): menu SMS → *Automatic SMS ON (100 every 30 min)*.
 
 ## Current status (live since 28 Sep 2026)
 - **Mail runs from this master sheet.** Cloud Run job `email-sender-master` (every 5 min, 10:00-17:55 Mon-Sat IST)
