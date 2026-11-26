@@ -376,10 +376,59 @@ function waAutoOn() {
 
 function waAutoOff() { waAutoOff_(false); }
 
+/** Turns off BOTH timers (the 5-minute sender and the 30-minute batches), so only one can ever run. */
 function waAutoOff_(silent) {
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'waTick') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (h === 'waTick' || h === WA_BATCH.HANDLER) ScriptApp.deleteTrigger(t);
+  });
   ccSetSetting_('Automatic WhatsApp', 'Off');
   if (!silent) ccAlert_('Automatic WhatsApp sending is OFF.');
+}
+
+/* ---------- automatic batches (26 Nov 2026) ----------
+ * Every 30 minutes: the dashboard's "Send next 30" for every brand, one after the other. Each run picks up any
+ * number added since the last run (consent Yes, never sent, oldest row first). Still respected: WhatsApp On and
+ * sending hours (Limits tab), the brand's daily maximum, live sending (Settings), Do Not Contact, already sent.
+ * The brand that goes first rotates, so a slow run (SB is huge) never keeps the last brands waiting.
+ * Menu: AUTOMATION > WhatsApp > Turn automatic batches ON / Turn automatic sending OFF.
+ */
+var WA_BATCH = { HANDLER: 'waBatchTick', SIZE: 30, MINUTES: 30, STOP_MS: 200000 };
+
+function waBatchOn() {
+  waAutoOff_(true);
+  ScriptApp.newTrigger(WA_BATCH.HANDLER).timeBased().everyMinutes(WA_BATCH.MINUTES).create();
+  ccSetSetting_('Automatic WhatsApp', 'On (batches: ' + WA_BATCH.SIZE + ' per brand every ' + WA_BATCH.MINUTES + ' min)');
+  ccAlert_('Automatic WhatsApp batches are ON: up to ' + WA_BATCH.SIZE + ' per brand every ' + WA_BATCH.MINUTES +
+    ' minutes, within the Limits tab (On, hours, daily maximum).\nLive sending: ' + (ccSetting_('WhatsApp live sending') || 'No') +
+    ' (No = nothing is sent).');
+}
+
+function waBatchTick() { waBatchRun_(); }
+
+function waBatchRun_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) { Logger.log('WhatsApp batch skipped: another WhatsApp run is in progress.'); return ['busy']; }
+  var out = [], t0 = Date.now();
+  try {
+    var now = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'HH:mm'), mins = Number(now.slice(0, 2)) * 60 + Number(now.slice(3, 5));
+    var p = PropertiesService.getScriptProperties(), n = CC.BRANDS.length, first = Number(p.getProperty('WA_BATCH_FIRST') || 0) % n;
+    p.setProperty('WA_BATCH_FIRST', String((first + 1) % n));
+    for (var k = 0; k < n; k++) {
+      var code = CC.BRANDS[(first + k) % n][0];
+      if (Date.now() - t0 > WA_BATCH.STOP_MS) { out.push(code + ': next run (time limit)'); continue; }
+      var lim = ccLimits_(code, 'WhatsApp');
+      if (!lim || !lim.on) { out.push(code + ': off'); continue; }
+      if (!ccWithinWindow_(mins, lim.start, lim.end)) { out.push(code + ': outside hours ' + lim.start + '-' + lim.end); continue; }
+      var r;
+      try { r = ibSendNext_({ brand: code, count: WA_BATCH.SIZE }); } catch (e) { r = { message: String(e.message || e) }; }
+      out.push(code + ': ' + r.message);
+    }
+  } finally { lock.releaseLock(); }
+  var line = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm') + '  ' + out.join(' | ');
+  try { ccSetSetting_('Last WhatsApp batch', line.slice(0, 1000)); } catch (e) { /* the log line below is enough */ }
+  Logger.log(line);
+  return out;
 }
 
 /* ============================== the sender ============================== */
