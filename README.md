@@ -124,6 +124,11 @@ template to the next 30 numbers waiting (consent Yes, never sent, oldest row fir
 never more than the daily maximum in the Limits tab (WhatsApp: 2,000 per brand per day since 17 Nov). Code: `common/Inbox.gs`
 (`ibBulkAdd_`, `ibSendNext_`, `ibQueue_`), `whatsapp/WhatsApp.gs` (`waSendReady_`); dashboard `app/api/whatsapp`, `components/wa-bulk.js`.
 
+**Dashboard: WhatsApp template preview (26 Nov 2026).** In the dashboard, Owner and Admin can click a WhatsApp template
+name to see the message as a customer gets it (picture, text with a sample name in the blanks, footer, buttons). The sheet
+reads the template from Meta (read-only action `templates`, kept 10 minutes). Code: `common/Inbox.gs` (`ibTemplatePreview_`);
+live in the sheet's web app since version 18.
+
 **Sizes.** A WhatsApp white list needs (yellow rows + numbers never typed in yellow) rows; SB WhatsApp has 189,550
 (13 Nov: 173,550 yellow + 10,856 others). When it shows `#REF!` the script adds empty rows by itself on the next edit
 (`leRoom_`). Mail tabs: SB Mail 3,000, others 2,000-4,000; add rows by hand if `#REF!`. The whole spreadsheet must stay under Google's 10 million cells.
