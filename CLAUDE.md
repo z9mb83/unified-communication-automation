@@ -15,7 +15,7 @@ Cold outreach for five brands from **one Google Sheet**, the *Automation Control
 ## Where things live
 | What | Where |
 |---|---|
-| Automation Control Center sheet | `1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc` |
+| Automation Control Center sheet | not kept on GitHub (open it from Google Drive; the sheet is restricted) |
 | Its Apps Script project (bound; shows as "Untitled project") | `1bqg1MgA09MZcD2Fai-Jq5s-j88dmqNOEkIL55BlIGTcpHvVNuyWG8Ws0` - files Code.gs (= `common/Core.gs`), Mail.gs, WhatsApp.gs, Dashboard.gs, Inbox.gs, LeadEntry.gs |
 | Old email sheet (Zoho_Email_Automation, before the master sheet) | `18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI` |
 | Web app (feed for the dashboard) | sheet menu AUTOMATION → Dashboard → Show feed link; called with `?key=` (access key in Script Properties). Version 18 live since 26 Nov 2026 (adds read-only action `templates` for the template preview) |
@@ -88,7 +88,7 @@ unified-communication-automation · automation-dashboard · OCR · task-tracker 
 ### Google Sheets
 | Sheet | ID | Links to the websites inside the sheet |
 |---|---|---|
-| Automation Control Center | `1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc` | Dashboard tab A2; Settings rows "Web dashboard", "Send SMS page", "Task tracker", "Automatic SMS" and the three "Code: … (GitHub)" links (added 26 Nov 2026) |
+| Automation Control Center | not kept on GitHub (open it from Google Drive; the sheet is restricted) | Dashboard tab A2; Settings rows "Web dashboard", "Send SMS page", "Task tracker", "Automatic SMS" and the three "Code: … (GitHub)" links (added 26 Nov 2026) |
 | Old email sheet (Zoho_Email_Automation) | `18hjldwZeoQ8Y99ngc02OVpoT_4Pe1rM0nNhS2KPxfOI` | - |
 | Shaadi OCR (SMS for SB) | `1FRZ7ErIx9vzN_dA-7eDjvQPyMUIMocGbFieL42G3LxE` | tab **Links** |
 | Property OCR / "Property NeoDove" (SMS for PE) | `1LRXRZ2TTRe8lCP5kPOYUvpA4cispuTRN3LgnYdaJSoE` | tab **Links** |
@@ -138,6 +138,10 @@ If the z9mb83 repo is attached to the session directly, just push a branch and o
 - 26 Nov: automatic batches switched ON, 10:00-17:00: WhatsApp 30 per brand every 30 min (trigger `waBatchTick`, Limits tab
   hours 10:00-17:00) and SMS 100 every 30 min for SB and PE (OCR sheets, trigger `smsAutoTick`). Dashboard: inbox brand tabs,
   SMS upload, Owner / Admin / Viewer logins (`ADMIN_PASSWORD` in Vercel), WhatsApp template preview (web app v18).
+- 26 Nov: the sheet's sharing set to **Restricted** (was "anyone with the link can edit"). Access: the owner account + the
+  email sender's service account (`email-sender-runner@…`). Web apps and timers run as the owner, so nothing else needed it.
+  The sheet link / ID were removed from the notes on GitHub; the ID stays only in `mail/brands_master/*/config.json` (and its
+  test) because the running email sender reads it there. Without access the ID alone opens nothing.
 - Still open: the old `linkwithmarketing-design` repos can be archived. The z9mb83 repos are public: make them private.
 
 ## Owner and how to work with him
