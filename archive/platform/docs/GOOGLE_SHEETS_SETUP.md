@@ -7,7 +7,7 @@ The Apps Script project is only a UI. It never sends messages and never holds se
 * WhatsApp: https://docs.google.com/spreadsheets/d/1cOi3D9b2-rncWkIvQdLeuaHut78hmT_w_r15EcUOWm4/edit (tab `WhatsApp Contacts`)
 * SMS: https://docs.google.com/spreadsheets/d/105pPI82jrNnx9GsmsG-_vssFI7Z5nrFW62wtAe1Ramk/edit (tab `SMS Contacts`)
 
-* Central control: https://docs.google.com/spreadsheets/d/1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc/edit
+* Central control: (link not kept on GitHub - open "Automation Control Center" in Google Drive)
   (Automation Control Center — live counts, task list; also set Script Property
   `UCA_EMAIL_SPREADSHEET_ID` = the email workbook ID so Stop / Emergency Stop reach the existing cells)
 
