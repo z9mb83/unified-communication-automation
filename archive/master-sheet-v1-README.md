@@ -1,6 +1,6 @@
 # Master sheet — Automation Control Center
 
-Sheet: https://docs.google.com/spreadsheets/d/1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc/edit
+Sheet: (link not kept on GitHub - open "Automation Control Center" in Google Drive)
 
 One sheet to add contacts for all brands and send Email, WhatsApp and SMS. Runs entirely in
 Google Apps Script (no Cloud Run, no cost).

@@ -3,7 +3,7 @@
 One Google Sheet runs cold email and WhatsApp for five brands:
 **SB** Shaadi Bells · **99M** 99 Marketing Services · **99S** 99 Staffing Services · **PE** Property Experts Group · **SC** Skyline Capital.
 
-Sheet: [Automation Control Center](https://docs.google.com/spreadsheets/d/1hiR6ofVNl9lpujWk8T8mGMml53ru0aJwC06NtUdeJTc/edit)
+Sheet: **Automation Control Center** in the linkwithmarketing Google Drive (access restricted since 26 Nov 2026; the link is not kept on GitHub)
 
 ## Repository layout: one folder per tool
 
