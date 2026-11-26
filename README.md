@@ -139,12 +139,13 @@ live in the sheet's web app since version 18.
   chosen mailbox's own daily/hourly limit.
 - **WhatsApp**: runs every 5 minutes when automatic sending is on; per brand it sends up to the brand's limits
   (with a gap it sends one per run). Meta also caps new numbers (about 250 new contacts a day at first).
-- **WhatsApp automatic batches** (added 26 Nov 2026, **off** until switched on): menu WhatsApp → *Turn automatic batches ON
+- **WhatsApp automatic batches** (added 26 Nov 2026, switched **on** 26 Nov 2026): menu WhatsApp → *Turn automatic batches ON
   (30 per brand every 30 min)*. Every 30 minutes each brand gets the dashboard's "Send next 30" (consent Yes, never sent,
   oldest first, so newly added numbers are picked up on the next run), inside the brand's On / hours / daily maximum
   (Limits tab) and only when *WhatsApp live sending* is Yes. Turning it on switches off the 5-minute sender (only one timer at
   a time); *Turn automatic sending OFF (both)* stops either. Last result: Settings row **Last WhatsApp batch**.
   Code: `waBatchOn`, `waBatchRun_` in `whatsapp/WhatsApp.gs`; tests `common/test/batch.test.js`.
+  **Switched ON 26 Nov 2026** (owner); WhatsApp hours in the Limits tab set to 10:00-17:00 for all brands. SMS batches also ON, 10:00-17:00.
 - **SMS automatic batches** live in the OCR sheets (repo `OCR`, `src/SmsApi.gs`): menu SMS → *Automatic SMS ON (100 every 30 min)*.
 
 ## Current status (live since 28 Sep 2026)
@@ -182,7 +183,10 @@ live in the sheet's web app since version 18.
   `mail/tools/send_sample_summary.sh` (sample summary email with today's numbers).
 
 ## Live dashboard (Vercel)
-**https://automation-dashboard-pi-ten.vercel.app** - password protected; charts of emails, replies, WhatsApp,
+**https://automation-dashboard-pi-ten.vercel.app** - three logins (since 26 Nov 2026): **Owner** (`DASHBOARD_PASSWORD`:
+read-only replies, numbers sent, templates in use, costs), **Admin** (`ADMIN_PASSWORD`: uploads, sending, all chats,
+reports, never costs) and **Viewer** (no password, names and numbers hidden). Click a WhatsApp template name to see how it
+looks. charts of emails, replies, WhatsApp,
 lead pipeline and mailbox limits for all brands, refreshed every minute. Pages: Home (totals, needs attention, sending
 costs), Mail (incl. email replies waiting), WhatsApp, SMS (Telinfy reports per template, wallet, stop list), Inbox
 (WhatsApp chats). The **cost button** (top right) shows WhatsApp (Rs 0.8631 + 18% GST per delivered template) and SMS
@@ -198,7 +202,8 @@ master sheet --(read-only)--> common/Dashboard.gs web app (JSON, needs access ke
 ```
 - It only **reads** the sheet; a dashboard problem can never stop mail or WhatsApp.
 - Vercel settings (Project -> Settings -> Environment Variables): `SHEET_API_URL` (menu **Dashboard -> Show feed link**),
-  `SHEET_API_KEY` (menu **Dashboard -> Create access key**, 64 characters, shown once), `DASHBOARD_PASSWORD`.
+  `SHEET_API_KEY` (menu **Dashboard -> Create access key**, 64 characters, shown once), `DASHBOARD_PASSWORD` (owner),
+  `ADMIN_PASSWORD` (admin).
 - After changing any Vercel setting: **Deployments -> latest -> ... -> Redeploy** (settings apply only to new deployments).
 - Code change to the dashboard: push to `main` of `automation-dashboard`; Vercel deploys automatically.
 - Code change to `common/Dashboard.gs`: paste it into the sheet script, then **Deploy -> Manage deployments -> edit ->
