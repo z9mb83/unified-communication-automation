@@ -353,7 +353,7 @@ function ibPost_(e) {
   else {
     var lock = LockService.getScriptLock(), a = e.parameter.action;
     // read-only questions from the dashboard do not wait for the lock (two at once used to time out)
-    var readOnly = ['brands', 'mailbrands', 'queue', 'mailqueue', 'rowstatus', 'mailrowstatus'].indexOf(a) !== -1;
+    var readOnly = ['brands', 'mailbrands', 'queue', 'mailqueue', 'rowstatus', 'mailrowstatus', 'templates'].indexOf(a) !== -1;
     try {
       if (!readOnly) lock.waitLock(25000);
       var p = {};
@@ -375,6 +375,7 @@ function ibPost_(e) {
       else if (a === 'mailsendnext') out = ibMailSendNext_(p);
       else if (a === 'mailrowstatus') out = ibMailRowStatus_(p);
       else if (a === 'mailbrands') out = ibMailBrands_();
+      else if (a === 'templates') out = ibTemplatePreview_(p);
       else out = { ok: false, message: 'Unknown action.' };
     } catch (err) {
       out = { ok: false, message: String(err.message || err).slice(0, 200) };
@@ -383,6 +384,48 @@ function ibPost_(e) {
     }
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ============================== dashboard: WhatsApp template preview (26 Nov 2026) ============================== */
+
+/**
+ * Each brand's WhatsApp template as Meta stores it, for the dashboard's "how it looks" preview. Read-only (never sends).
+ * {ok, templates: [{code, name, language, status, category, header: {format, text}, body, footer, buttons: [{type, text}],
+ *  examples: [sample values Meta was given at approval], headerUrl}]}. Cached 10 minutes (p.fresh = true skips the cache).
+ */
+function ibTemplatePreview_(p) {
+  var cache = CacheService.getScriptCache(), hit = !(p && p.fresh) && cache.get('ib_tpl_preview');
+  if (hit) { try { return JSON.parse(hit); } catch (e) { /* rebuild */ } }
+  var out = [];
+  CC.BRANDS.forEach(function (b) {
+    var code = b[0], setup = waSetup_(code);
+    if (!setup || !setup.template) { out.push({ code: code, error: 'No template in WhatsApp Setup' }); return; }
+    try {
+      var r = waGraph_(setup.waba + '/message_templates?fields=name,status,language,category,components&limit=50&name=' +
+        encodeURIComponent(setup.template), waToken_(code));
+      if (r.code !== 200) throw new Error(waClassifyError_(r.code, r.body).message);
+      var list = (r.body.data || []).filter(function (x) { return x.name === setup.template; });
+      var t = list.filter(function (x) { return x.language === setup.language; })[0] || list[0];
+      if (!t) throw new Error('Template "' + setup.template + '" not found at Meta');
+      var tpl = { code: code, name: t.name, language: t.language, status: String(t.status || ''), category: String(t.category || ''),
+        header: null, body: '', footer: '', buttons: [], examples: [], headerUrl: setup.headerUrl || '' };
+      (t.components || []).forEach(function (c) {
+        var type = String(c.type || '').toUpperCase();
+        if (type === 'HEADER') tpl.header = { format: String(c.format || 'TEXT').toUpperCase(), text: String(c.text || '') };
+        else if (type === 'BODY') {
+          tpl.body = String(c.text || '');
+          var ex = c.example || {};
+          if (ex.body_text && ex.body_text[0]) tpl.examples = ex.body_text[0].map(String);
+          else if (ex.body_text_named_params) tpl.examples = ex.body_text_named_params.map(function (x) { return String(x.example || ''); });
+        } else if (type === 'FOOTER') tpl.footer = String(c.text || '');
+        else if (type === 'BUTTONS') tpl.buttons = (c.buttons || []).map(function (x) { return { type: String(x.type || ''), text: String(x.text || '') }; });
+      });
+      out.push(tpl);
+    } catch (e) { out.push({ code: code, name: setup.template, error: String(e.message || e).slice(0, 200) }); }
+  });
+  var res = { ok: true, templates: out };
+  try { cache.put('ib_tpl_preview', JSON.stringify(res), 600); } catch (e) { /* too big: not cached */ }
+  return res;
 }
 
 /* ============================== dashboard: upload numbers + "Send next 30" ============================== */
